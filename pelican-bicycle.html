@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="一幅鹈鹕骑着青绿色自行车的原创 SVG 插画">
+  <title>骑自行车的鹈鹕</title>
+  <style>
+    :root {
+      --paper: #f6efdf;
+      --paper-light: #fffaf0;
+      --ink: #263436;
+      --ink-soft: #66706c;
+      --feather: #fffdf5;
+      --feather-shade: #dce3dc;
+      --orange: #ef873f;
+      --orange-light: #f6b65f;
+      --orange-dark: #c95c2d;
+      --teal: #167b79;
+      --teal-light: #5aa9a2;
+      --yellow: #f0c96a;
+      --stroke-main: 8;
+      --stroke-detail: 5;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      display: grid;
+      min-height: 100dvh;
+      place-items: center;
+      overflow: hidden;
+      background: var(--paper);
+    }
+
+    .illustration {
+      display: block;
+      width: min(100vw, 125vh);
+      height: auto;
+      max-height: 100dvh;
+    }
+
+    .outline {
+      stroke: var(--ink);
+      stroke-width: var(--stroke-main);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .detail {
+      fill: none;
+      stroke: var(--ink);
+      stroke-width: var(--stroke-detail);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .spoke {
+      stroke: var(--ink-soft);
+      stroke-width: 2.5;
+      opacity: .58;
+    }
+  </style>
+</head>
+<body>
+  <svg class="illustration" viewBox="0 0 1000 800" role="img" aria-labelledby="pelican-title pelican-desc" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+    <title id="pelican-title">骑自行车的鹈鹕</title>
+    <desc id="pelican-desc">一只白色鹈鹕用翅膀扶着车把，双脚踩着踏板，骑一辆青绿色自行车穿过温暖的奶油色风景。</desc>
+
+    <defs>
+      <filter id="paper-grain" x="-10%" y="-10%" width="120%" height="120%">
+        <feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="3" seed="8" result="noise"/>
+        <feColorMatrix in="noise" type="saturate" values="0" result="mono"/>
+        <feComponentTransfer in="mono">
+          <feFuncA type="table" tableValues="0 .055"/>
+        </feComponentTransfer>
+      </filter>
+      <clipPath id="scene-clip">
+        <rect x="24" y="24" width="952" height="752" rx="30"/>
+      </clipPath>
+    </defs>
+
+    <g clip-path="url(#scene-clip)">
+      <rect width="1000" height="800" fill="var(--paper-light)"/>
+      <circle cx="184" cy="170" r="82" fill="var(--yellow)" opacity=".72"/>
+      <path d="M-40 620 C130 565 255 612 392 588 C560 558 720 565 1040 494 L1040 800 L-40 800 Z" fill="var(--feather-shade)" opacity=".55"/>
+      <path d="M-40 666 C180 616 331 653 482 626 C665 594 794 614 1040 554 L1040 800 L-40 800 Z" fill="var(--teal-light)" opacity=".22"/>
+
+      <g aria-hidden="true" opacity=".54">
+        <path class="detail" d="M104 264h64m-43-30 22 30-22 30" stroke="var(--orange-dark)"/>
+        <path class="detail" d="M836 314h70m-24-28 24 28-24 28" stroke="var(--teal)"/>
+        <path class="detail" d="M90 393h96" stroke="var(--ink-soft)"/>
+      </g>
+
+      <g id="bicycle">
+        <ellipse cx="500" cy="735" rx="363" ry="24" fill="var(--ink)" opacity=".12"/>
+
+        <g id="rear-wheel">
+          <circle class="outline" cx="294" cy="598" r="139" fill="var(--paper-light)"/>
+          <circle cx="294" cy="598" r="125" fill="none" stroke="var(--teal-light)" stroke-width="4"/>
+          <g class="spoke">
+            <line x1="294" y1="598" x2="294" y2="473"/><line x1="294" y1="598" x2="356" y2="490"/>
+            <line x1="294" y1="598" x2="402" y2="536"/><line x1="294" y1="598" x2="419" y2="598"/>
+            <line x1="294" y1="598" x2="402" y2="661"/><line x1="294" y1="598" x2="356" y2="706"/>
+            <line x1="294" y1="598" x2="294" y2="723"/><line x1="294" y1="598" x2="232" y2="706"/>
+            <line x1="294" y1="598" x2="186" y2="661"/><line x1="294" y1="598" x2="169" y2="598"/>
+            <line x1="294" y1="598" x2="186" y2="536"/><line x1="294" y1="598" x2="232" y2="490"/>
+          </g>
+          <circle cx="294" cy="598" r="13" fill="var(--orange)" stroke="var(--ink)" stroke-width="6"/>
+        </g>
+
+        <g id="front-wheel">
+          <circle class="outline" cx="718" cy="598" r="139" fill="var(--paper-light)"/>
+          <circle cx="718" cy="598" r="125" fill="none" stroke="var(--teal-light)" stroke-width="4"/>
+          <g class="spoke">
+            <line x1="718" y1="598" x2="718" y2="473"/><line x1="718" y1="598" x2="780" y2="490"/>
+            <line x1="718" y1="598" x2="826" y2="536"/><line x1="718" y1="598" x2="843" y2="598"/>
+            <line x1="718" y1="598" x2="826" y2="661"/><line x1="718" y1="598" x2="780" y2="706"/>
+            <line x1="718" y1="598" x2="718" y2="723"/><line x1="718" y1="598" x2="656" y2="706"/>
+            <line x1="718" y1="598" x2="610" y2="661"/><line x1="718" y1="598" x2="593" y2="598"/>
+            <line x1="718" y1="598" x2="610" y2="536"/><line x1="718" y1="598" x2="656" y2="490"/>
+          </g>
+          <circle cx="718" cy="598" r="13" fill="var(--orange)" stroke="var(--ink)" stroke-width="6"/>
+        </g>
+
+        <g id="frame" fill="none" stroke="var(--teal)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M294 598 426 444 512 598 294 598Z"/>
+          <path d="M426 444 615 470 512 598Z"/>
+          <path d="M615 470 718 598"/>
+          <path d="M606 439 629 493"/>
+        </g>
+        <path d="M386 431h90" stroke="var(--ink)" stroke-width="16" stroke-linecap="round"/>
+        <path class="outline" d="M718 598 658 396m-33 6h74m-50-20 9 14" fill="none"/>
+        <path d="M625 402h74" stroke="var(--teal)" stroke-width="10" stroke-linecap="round"/>
+        <circle cx="512" cy="598" r="31" fill="var(--paper-light)" stroke="var(--ink)" stroke-width="7"/>
+        <path class="detail" d="M512 598 555 626m-43-28-42-29"/>
+        <path d="M555 626h42m-127-57h-42" stroke="var(--ink)" stroke-width="9" stroke-linecap="round"/>
+        <path d="M319 584c58 5 119 8 193 14" fill="none" stroke="var(--orange-dark)" stroke-width="5" stroke-dasharray="8 10"/>
+      </g>
+
+      <g id="pelican">
+        <path class="outline" d="M412 430 C376 382 381 299 432 265 C470 240 530 250 559 289 C582 320 580 370 558 408 C542 436 502 450 461 445 C443 443 425 438 412 430Z" fill="var(--feather)"/>
+        <path class="outline" d="M456 291 C449 246 455 197 488 159 C516 127 560 116 594 134 C620 148 633 174 625 199 C615 230 574 235 563 265 L552 324Z" fill="var(--feather)"/>
+        <path d="M478 179 C499 154 535 142 564 149" fill="none" stroke="var(--feather-shade)" stroke-width="13" stroke-linecap="round"/>
+
+        <path class="outline" d="M594 163 C659 137 765 136 860 160 C779 181 686 186 606 180Z" fill="var(--orange-light)"/>
+        <path class="outline" d="M606 180 C693 187 780 181 860 160 C831 213 752 248 665 237 C625 232 604 211 606 180Z" fill="var(--orange)"/>
+        <path d="M633 199c54 11 113 4 172-15" fill="none" stroke="var(--orange-dark)" stroke-width="5" stroke-linecap="round" opacity=".58"/>
+        <circle cx="585" cy="158" r="11" fill="var(--ink)"/>
+        <circle cx="581" cy="154" r="3.5" fill="var(--paper-light)"/>
+        <path class="detail" d="M556 130c12-12 26-16 40-12"/>
+
+        <path class="outline" d="M435 296 C393 308 371 346 382 382 C397 430 459 435 505 395 C534 370 550 332 536 302 C512 338 480 345 448 335 C433 330 426 314 435 296Z" fill="var(--feather-shade)"/>
+        <path d="M410 349c28 24 63 25 98 1m-93 25c25 18 51 18 77 4" fill="none" stroke="var(--ink-soft)" stroke-width="5" stroke-linecap="round"/>
+
+        <path class="outline" d="M503 303 C542 320 573 348 607 382 C625 400 640 406 659 402" fill="none"/>
+        <path d="M652 394c9-7 19-4 24 4m-23 8c9 6 18 5 25-2" fill="none" stroke="var(--orange-dark)" stroke-width="8" stroke-linecap="round"/>
+
+        <path class="outline" d="M443 431 C433 469 446 508 480 539 L512 569" fill="none"/>
+        <path class="outline" d="M505 435 C519 469 526 505 520 539 L555 626" fill="none"/>
+        <path d="M503 563c-16-2-29 1-39 10m85 53c14 8 30 9 44 2" fill="none" stroke="var(--orange)" stroke-width="13" stroke-linecap="round"/>
+        <path d="M486 543 470 569m72 37 13 20" fill="none" stroke="var(--orange-dark)" stroke-width="7" stroke-linecap="round"/>
+
+        <path d="M401 416c-28 7-45 25-51 51" fill="none" stroke="var(--feather)" stroke-width="24" stroke-linecap="round"/>
+        <path class="detail" d="M401 416c-28 7-45 25-51 51"/>
+        <path d="M346 470c-8-4-15-3-21 3m26 5c-9 5-17 5-24 1" fill="none" stroke="var(--orange-dark)" stroke-width="7" stroke-linecap="round"/>
+
+        <path d="M432 419c-8 12-13 26-14 40" fill="none" stroke="var(--ink-soft)" stroke-width="4" stroke-linecap="round"/>
+      </g>
+
+      <g aria-hidden="true" fill="var(--ink-soft)" opacity=".55">
+        <circle cx="105" cy="706" r="5"/><circle cx="127" cy="706" r="5"/><circle cx="149" cy="706" r="5"/>
+        <path d="M845 708h70v5h-70z"/>
+      </g>
+
+      <rect width="1000" height="800" filter="url(#paper-grain)" opacity=".46" pointer-events="none"/>
+    </g>
+    <rect x="24" y="24" width="952" height="752" rx="30" fill="none" stroke="var(--ink)" stroke-width="4"/>
+  </svg>
+</body>
+</html>
