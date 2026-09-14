@@ -25,6 +25,7 @@ export async function RepositoryReadme({ owner, name }: RepositoryReadmeProps) {
           key={readme.repository + readme.content}
           markdown={readme.content}
           imageBaseUrl={readme.html_url}
+          repository={readme.repository}
         />
       ) : (
         <div className="readme-empty">

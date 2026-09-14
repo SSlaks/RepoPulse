@@ -17,14 +17,30 @@ export const modelListResponseSchema = z.object({
 });
 export type ModelList = z.infer<typeof modelListResponseSchema>;
 export type ModelListRequest = z.infer<typeof modelListRequestSchema>;
+export const readmeModeSchema = z.enum(["summary", "translation"]);
 export const readmeRequestSchema = credentialsSchema.safeExtend({
   markdown: z.string().min(1).max(MAX_README_CHARS).refine((value) => value.trim().length > 0),
+  mode: readmeModeSchema.default("summary"),
 });
 export type AiCredentials = z.infer<typeof credentialsSchema>;
-export const resultSchema = z.object({ summary: z.string().trim().min(1).max(12000), translation: z.string().min(1).max(600000) });
-export type AiResult = z.infer<typeof resultSchema>;
+export type ReadmeMode = z.infer<typeof readmeModeSchema>;
+export const summaryResultSchema = z.object({ mode: z.literal("summary"), summary: z.string().trim().min(1).max(1000) }).strict();
+export const translationResultSchema = z.object({ mode: z.literal("translation"), translation: z.string().min(1).max(600000) }).strict();
+export const resultSchema = z.discriminatedUnion("mode", [summaryResultSchema, translationResultSchema]);
+export type SummaryResult = z.infer<typeof summaryResultSchema>;
+export type TranslationResult = z.infer<typeof translationResultSchema>;
+export type AiResult = SummaryResult | TranslationResult;
+export const translationRecordSchema = z.object({
+  repository: z.string().trim().min(1).max(512),
+  translation: z.string().min(1).max(600000),
+  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  generatedAt: z.string().datetime(),
+  modelName: z.string().trim().min(1).max(256),
+  imageBaseUrl: z.string().trim().min(1).max(2048),
+}).strict();
+export type TranslationRecord = z.infer<typeof translationRecordSchema>;
 export const eventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("progress"), completed: z.number(), total: z.number(), message: z.string() }),
+  z.object({ type: z.literal("progress"), completed: z.number().nonnegative(), total: z.number().positive(), message: z.string(), indeterminate: z.boolean().optional() }),
   z.object({ type: z.literal("result"), result: resultSchema }),
   z.object({ type: z.literal("error"), error: z.object({ code: z.string(), message: z.string() }) }),
 ]);

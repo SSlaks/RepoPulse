@@ -2,7 +2,7 @@ import { credentialsSchema, modelListRequestSchema, readmeRequestSchema, type Ai
 import { AiError, publicAiError } from "./errors";
 import { discoverModels } from "./models";
 import { callModel } from "./provider";
-import { translateReadme } from "./translate";
+import { summarizeReadme, translateReadme } from "./translate";
 
 const HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 
@@ -55,7 +55,9 @@ export async function generateReadme(request: Request): Promise<Response> {
         const encoder = new TextEncoder();
         const send = (event: AiEvent) => { if (!closed) controller.enqueue(encoder.encode(JSON.stringify(event) + "\n")); };
         try {
-          const result = await translateReadme(parsed.data, parsed.data.markdown, signal, send);
+          const result = parsed.data.mode === "summary"
+            ? await summarizeReadme(parsed.data, parsed.data.markdown, signal, send)
+            : await translateReadme(parsed.data, parsed.data.markdown, signal, send);
           signal.throwIfAborted();
           send({ type: "result", result });
         } catch (error) {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eventSchema, modelListResponseSchema, type ModelListRequest, type ModelList, type AiCredentials, type AiEvent, type AiResult } from "./contracts";
+import { eventSchema, modelListResponseSchema, type ModelListRequest, type ModelList, type AiCredentials, type AiEvent, type ReadmeMode, type AiResult, type SummaryResult, type TranslationResult } from "./contracts";
 
 const errorSchema = z.object({ error: z.object({ message: z.string() }) });
 async function post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
@@ -17,8 +17,11 @@ export async function testAiConnection(credentials: AiCredentials, signal: Abort
   if (!z.object({ ok: z.literal(true) }).safeParse(result).success) throw new Error("连接测试返回无效结果。");
 }
 
-export async function requestReadme(credentials: AiCredentials, markdown: string, signal: AbortSignal, progress: (event: Extract<AiEvent, { type: "progress" }>) => void): Promise<AiResult> {
-  const response = await post("readme", { ...credentials, markdown }, signal);
+export async function requestReadme(credentials: AiCredentials, markdown: string, mode: "summary", signal: AbortSignal, progress: (event: Extract<AiEvent, { type: "progress" }>) => void): Promise<SummaryResult>;
+export async function requestReadme(credentials: AiCredentials, markdown: string, mode: "translation", signal: AbortSignal, progress: (event: Extract<AiEvent, { type: "progress" }>) => void): Promise<TranslationResult>;
+export async function requestReadme(credentials: AiCredentials, markdown: string, mode: ReadmeMode, signal: AbortSignal, progress: (event: Extract<AiEvent, { type: "progress" }>) => void): Promise<AiResult>;
+export async function requestReadme(credentials: AiCredentials, markdown: string, mode: ReadmeMode, signal: AbortSignal, progress: (event: Extract<AiEvent, { type: "progress" }>) => void): Promise<AiResult> {
+  const response = await post("readme", { ...credentials, markdown, mode }, signal);
   const reader = response.body?.getReader();
   if (!reader) throw new Error("未收到生成结果。");
   const decoder = new TextDecoder();
@@ -31,7 +34,10 @@ export async function requestReadme(credentials: AiCredentials, markdown: string
     const event = parsed.data;
     if (event.type === "error") throw new Error(event.error.message);
     if (event.type === "progress") progress(event);
-    if (event.type === "result") result = event.result;
+    if (event.type === "result") {
+      if (event.result.mode !== mode) throw new Error("生成结果与请求模式不一致。");
+      result = event.result;
+    }
   }
   try {
     while (true) {

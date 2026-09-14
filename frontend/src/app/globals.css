@@ -2270,10 +2270,26 @@ html[data-theme="dark"] .rank-3 > strong { color: #e89a6a; }
 .ai-readme-tabs { display: flex; gap: 5px; margin-right: auto; }
 .ai-readme-tabs button { display: inline-flex; height: 40px; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 13px; cursor: pointer; }
 .ai-readme-tabs button.selected { background: var(--blue-soft); color: var(--blue); }
-.ai-readme-notice { padding: 12px 24px; margin: 0; font-size: 13px; line-height: 1.8; }
+.ai-readme-notice { display: flex; align-items: center; gap: 12px; padding: 12px 24px; margin: 0; font-size: 13px; line-height: 1.8; }
 .ai-readme-notice a { margin-left: 10px; color: var(--blue); text-decoration: underline; }
-.ai-readme-progress { display: flex; gap: 15px; flex-wrap: wrap; align-items: center; padding: 12px 24px; font-size: 13px; }
-.ai-readme-progress progress { width: 160px; max-width: 100%; accent-color: var(--blue); }
+.ai-readme-progress-card { display: grid; grid-template-columns: auto minmax(170px, 1fr) minmax(210px, 1.4fr) auto; align-items: center; gap: 14px; margin: 16px 24px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; background: linear-gradient(135deg, var(--surface-muted), var(--surface)); box-shadow: 0 8px 24px rgb(20 35 65 / 8%); }
+.ai-readme-progress-icon { display: grid; width: 38px; height: 38px; place-items: center; color: var(--blue); border-radius: 11px; background: var(--blue-soft); }
+.ai-readme-progress-copy { display: grid; gap: 3px; min-width: 0; }
+.ai-readme-progress-copy strong { color: var(--ink); font-size: 13px; }
+.ai-readme-progress-copy span { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ai-readme-progress-meter { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; }
+.ai-readme-progress-track { position: relative; height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface-strong); }
+.ai-readme-progress-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--blue), #74a7ff); transition: width 260ms ease; }
+.ai-readme-progress-track.indeterminate > span { width: 35%; background: linear-gradient(90deg, transparent, var(--blue), #74a7ff, transparent); animation: ai-progress-sweep 1.35s ease-in-out infinite; }
+.ai-readme-progress-meter small { min-width: 38px; color: var(--muted); font-size: 11px; text-align: right; white-space: nowrap; }
+.ai-readme-cancel { min-width: 70px; }
+.ai-readme-storage-error { justify-content: space-between; color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.ai-readme-storage-error > span { min-width: 0; }
+.ai-readme-storage-error > div { display: flex; flex: 0 0 auto; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.ai-readme-storage-error .ai-button { flex: 0 0 auto; }
+.ai-readme-storage-warning { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.ai-readme-record { display: flex; align-items: center; gap: 6px; padding: 8px 24px 0; margin: 0; color: var(--muted); font-size: 11px; }
+@keyframes ai-progress-sweep { from { transform: translateX(-130%); } to { transform: translateX(310%); } }
 .ai-summary { padding: 18px 22px; margin-bottom: 30px; background: var(--blue-soft); border-left: 3px solid var(--blue); }
 .ai-summary-title { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 14px; }
 .ai-summary-title strong { display: flex; align-items: center; gap: 7px; color: var(--blue); font-size: 15px; }
@@ -2291,7 +2307,11 @@ html[data-theme="dark"] .rank-3 > strong { color: #e89a6a; }
   .ai-provider-config input, .ai-provider-config select { font-size: 16px; }
   .readme-ai-toolbar { padding: 12px 16px; }
   .ai-readme-tabs { width: 100%; }
-  .ai-readme-notice, .ai-readme-progress { padding-inline: 16px; }
+  .ai-readme-notice, .ai-readme-record { padding-inline: 16px; }
+  .ai-readme-storage-error { align-items: flex-start; flex-direction: column; }
+  .ai-readme-storage-error > div { width: 100%; justify-content: flex-start; }
+  .ai-readme-progress-card { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; margin-inline: 16px; }
+  .ai-readme-progress-meter { grid-column: 1 / -1; }
 }
 
 .ai-model-refresh { margin-top: 12px; }

@@ -3,6 +3,7 @@ import { AI_PROVIDERS } from "../src/lib/ai/catalog";
 import { credentialsSchema, readmeRequestSchema } from "../src/lib/ai/contracts";
 import { callModel, parseCompletion, providerRequest } from "../src/lib/ai/server/provider";
 import { publicAiError, upstreamError } from "../src/lib/ai/server/errors";
+import { fingerprintMarkdown, saveReadmeTranslation } from "../src/lib/ai/readme-storage";
 import { splitMarkdown, translateReadme, validateTranslation } from "../src/lib/ai/server/translate";
 import { generateReadme, listModels, testConnection } from "../src/lib/ai/server/http";
 
@@ -14,6 +15,8 @@ function request(body: unknown, signal?: AbortSignal) { return new Request("http
 
 test("credentials whitelist rejects custom endpoints, models and oversized documents", () => {
   expect(credentialsSchema.safeParse(credentials).success).toBe(true);
+  expect(readmeRequestSchema.parse({ ...credentials, markdown: "README" }).mode).toBe("summary");
+  expect(readmeRequestSchema.safeParse({ ...credentials, markdown: "README", mode: "other" }).success).toBe(false);
   for (const invalid of [{ ...credentials, endpoint: "http://localhost" }, { ...credentials, model: "unknown" }, { ...credentials, apiKey: "bad\nkey" }]) expect(credentialsSchema.safeParse(invalid).success).toBe(false);
   expect(readmeRequestSchema.safeParse({ ...credentials, markdown: "a".repeat(100001) }).success).toBe(false);
 });
@@ -80,23 +83,120 @@ test("Markdown grouping preserves exact code, links and source order", () => {
   expect(() => validateTranslation("[Docs](https://a.test)", "[文档](https://a.test)")).not.toThrow();
 });
 
-test("translation streams milestones, preserves literal code and returns real parsed summary", async () => {
+test("summary mode only generates a concise project overview", async () => {
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    const body = JSON.parse(String(options?.body));
+    expect(body.messages[0].content).toContain("what project this is and what it is used for");
+    const input = JSON.parse(body.messages[1].content);
+    expect(input.document).toContain("# Hello");
+    return completion(JSON.stringify({ summary: "这是一个用于展示项目增长趋势的开源项目。\n\n- 提供仓库详情\n- 展示趋势图\n- 读取 README" }));
+  };
+  const response = await generateReadme(request({ ...credentials, mode: "summary", markdown: "# Hello\n\nA project." }));
+  const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+  expect(events.map((event) => event.type)).toEqual(["progress", "progress", "result"]);
+  expect(events.at(-1).result).toEqual({ mode: "summary", summary: expect.stringContaining("这是一个") });
+  expect(calls).toBe(1);
+});
+
+test("summary mode rejects more than three key points", async () => {
+  globalThis.fetch = async () => completion(JSON.stringify({
+    summary: "这是一个项目介绍，用于演示摘要边界。\n\n- 要点一\n- 要点二\n- 要点三\n- 要点四",
+  }));
+  const response = await generateReadme(request({ ...credentials, mode: "summary", markdown: "# Project" }));
+  const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+  expect(events.at(-1)).toMatchObject({ type: "error", error: { code: "INVALID_OUTPUT" } });
+  expect(events.at(-1).error.message).toContain("要点过多");
+});
+
+test("README fingerprints are stable SHA-256 values", async () => {
+  expect(await fingerprintMarkdown("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  expect(await fingerprintMarkdown("hello")).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+  expect(await fingerprintMarkdown("hello")).toBe(await fingerprintMarkdown("hello"));
+});
+
+test("cancelling an IndexedDB save aborts the pending write", async () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "indexedDB");
+  const controller = new AbortController();
+  let abortCalled = false;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const transaction = {
+    error: null,
+    objectStore: () => ({ put: () => { markStarted?.(); return {}; } }),
+    abort: () => {
+      abortCalled = true;
+      queueMicrotask(() => transaction.onabort?.(new Event("abort")));
+    },
+    onabort: null as ((event: Event) => void) | null,
+    oncomplete: null as ((event: Event) => void) | null,
+    onerror: null as ((event: Event) => void) | null,
+  };
+  const database = {
+    objectStoreNames: { contains: () => true },
+    transaction: () => transaction,
+    close: () => undefined,
+  };
+  const openRequest = { result: database, error: null, onsuccess: null as ((event: Event) => void) | null };
+  const fakeIndexedDb = {
+    open: () => {
+      queueMicrotask(() => openRequest.onsuccess?.(new Event("success")));
+      return openRequest;
+    },
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDb });
+  try {
+    const saving = saveReadmeTranslation({
+      repository: "owner/repository",
+      translation: "# 译文",
+      sourceFingerprint: "0".repeat(64),
+      generatedAt: "2026-09-14T00:00:00.000Z",
+      modelName: "测试模型",
+      imageBaseUrl: "https://github.com/owner/repository/blob/main/README.md",
+    }, controller.signal);
+    await started;
+    controller.abort();
+    await expect(saving).rejects.toMatchObject({ name: "AbortError" });
+    expect(abortCalled).toBe(true);
+  } finally {
+    if (originalDescriptor) Object.defineProperty(globalThis, "indexedDB", originalDescriptor);
+    else Reflect.deleteProperty(globalThis, "indexedDB");
+  }
+});
+
+test("translation mode streams milestones and preserves literal code without generating a summary", async () => {
   const calls: string[] = [];
   globalThis.fetch = async (_url, options) => {
     const body = JSON.parse(String(options?.body));
     expect(body.messages[0].content).toContain("untrusted document data");
     const input = JSON.parse(body.messages[1].content);
-    calls.push(input.document ?? "summary");
-    return completion(JSON.stringify(input.document ? { translation: input.document.replace("Hello", "你好").trim(), summary: "项目介绍" } : { summary: "这是项目摘要。" }));
+    calls.push(input.document);
+    return completion(JSON.stringify({ translation: input.document.replace("Hello", "你好").trim() }));
   };
-  const response = await generateReadme(request({ ...credentials, markdown: "# Hello\n\n```js\nconst x = 1;\n```\n" }));
+  const response = await generateReadme(request({ ...credentials, mode: "translation", markdown: "# Hello\n\n```js\nconst x = 1;\n```\n" }));
   const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
   expect(events[0].type).toBe("progress");
   const result = events.at(-1).result;
-  expect(result.summary).toBe("这是项目摘要。");
+  expect(result.mode).toBe("translation");
+  expect(result).not.toHaveProperty("summary");
   expect(result.translation).toContain("# 你好");
   expect(result.translation).toContain("```js\nconst x = 1;\n```");
-  expect(calls).toHaveLength(2);
+  expect(events.some((event) => event.type === "progress" && event.message === "正在校验译文")).toBe(true);
+  expect(calls).toHaveLength(1);
+});
+
+test("translation helper does not call a second summary model", async () => {
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    const body = JSON.parse(String(options?.body));
+    const input = JSON.parse(body.messages[1].content);
+    return completion(JSON.stringify({ translation: input.document.replace("Hello", "你好") }));
+  };
+  const result = await translateReadme(credentials, "# Hello", new AbortController().signal, () => undefined);
+  expect(result).toEqual({ mode: "translation", translation: "# 你好" });
+  expect(calls).toBe(1);
 });
 
 test("invalid JSON and truncated connections produce errors instead of fabricated translations", async () => {
@@ -154,7 +254,7 @@ test("reference definitions are preserved across chunk boundaries", async () => 
   globalThis.fetch = async (_url, options) => {
     const body = JSON.parse(String(options?.body));
     const input = JSON.parse(body.messages[1].content);
-    return completion(JSON.stringify(input.document ? { translation: input.document.replace("Title", "标题").trim(), summary: "链接说明" } : { summary: "文档概述" }));
+    return completion(JSON.stringify({ translation: input.document.replace("Title", "标题").trim() }));
   };
   const markdown = "# Title\n\n[Docs][docs]\n\n[docs]: https://example.com\n";
   const translated = await translateReadme(credentials, markdown, new AbortController().signal, () => undefined);
