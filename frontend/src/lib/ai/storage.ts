@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { credentialsSchema, type AiCredentials } from "./contracts";
+import { credentialsSchema, storedCredentialsSchema, type AiCredentials } from "./contracts";
 
 export const AI_STORAGE_KEY = "repopulse-ai-v1";
-const settingsSchema = z.object({ selected: z.string().nullable(), providers: z.record(z.string(), credentialsSchema) });
+const settingsSchema = z.object({ selected: z.string().nullable(), providers: z.record(z.string(), storedCredentialsSchema) });
 export type AiSettings = z.infer<typeof settingsSchema>;
 export const emptySettings = (): AiSettings => ({ selected: null, providers: {} });
 
@@ -25,7 +25,11 @@ export function storeAiSettings(settings: AiSettings): void {
 
 export function activeCredentials(): AiCredentials | null {
   const settings = loadAiSettings();
-  return settings.selected ? settings.providers[settings.selected] ?? null : null;
+  const selected = settings.selected ? settings.providers[settings.selected] : null;
+  if (!selected) return null;
+  const parsed = credentialsSchema.safeParse(selected);
+  if (!parsed.success) throw new Error("已保存的模型需重新选择，请前往大模型设置。");
+  return parsed.data;
 }
 
 export function safeAiReturnTo(value: string | null): string | null {

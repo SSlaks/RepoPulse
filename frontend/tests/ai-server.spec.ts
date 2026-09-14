@@ -4,7 +4,7 @@ import { credentialsSchema, readmeRequestSchema } from "../src/lib/ai/contracts"
 import { callModel, parseCompletion, providerRequest } from "../src/lib/ai/server/provider";
 import { publicAiError, upstreamError } from "../src/lib/ai/server/errors";
 import { splitMarkdown, translateReadme, validateTranslation } from "../src/lib/ai/server/translate";
-import { generateReadme, testConnection } from "../src/lib/ai/server/http";
+import { generateReadme, listModels, testConnection } from "../src/lib/ai/server/http";
 
 const credentials = { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-test-secret" };
 const originalFetch = globalThis.fetch;
@@ -159,4 +159,111 @@ test("reference definitions are preserved across chunk boundaries", async () => 
   const markdown = "# Title\n\n[Docs][docs]\n\n[docs]: https://example.com\n";
   const translated = await translateReadme(credentials, markdown, new AbortController().signal, () => undefined);
   expect(translated.translation).toContain("[docs]: https://example.com");
+});
+
+// Discovery tests use the same HTTP boundary as generation, with no real vendor calls.
+
+for (const provider of ["openai", "deepseek", "claude", "gemini"]) {
+  test(`${provider} discovery normalizes models, deduplicates and marks compatibility`, async () => {
+    const known = AI_PROVIDERS.find((p) => p.id === provider)!.models[0].id;
+    let calls = 0;
+    globalThis.fetch = async (url, options) => {
+      calls++;
+      expect(String(url)).not.toContain(credentials.apiKey);
+      expect(JSON.stringify(options?.headers)).toContain(credentials.apiKey);
+      expect(options?.redirect).toBe("error");
+      expect(options?.cache).toBe("no-store");
+      if (provider === "claude") {
+        if (calls === 2) expect(String(url)).toContain("after_id=cursor");
+        return Response.json({ data: [{ id: known, display_name: "Known" }, { id: "future-model", display_name: "Future" }], has_more: calls === 1, last_id: "cursor" });
+      }
+      if (provider === "gemini") {
+        if (calls === 2) expect(String(url)).toContain("pageToken=cursor");
+        return Response.json({ models: [{ name: `models/${known}` }, { name: "models/future-model", displayName: "Future" }], ...(calls === 1 ? { nextPageToken: "cursor" } : {}) });
+      }
+      return Response.json({ data: [{ id: known }, { id: known }, { id: "future-model" }] });
+    };
+    const response = await listModels(request({ provider, apiKey: credentials.apiKey }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.source).toBe("vendor");
+    expect(body.models).toHaveLength(2);
+    expect(body.models[0]).toMatchObject({ id: known, supported: true });
+    expect(body.models[1]).toMatchObject({ id: "future-model", supported: false });
+    expect(calls).toBe(provider === "claude" || provider === "gemini" ? 2 : 1);
+    expect(credentialsSchema.safeParse({ provider, apiKey: credentials.apiKey, model: "future-model" }).success).toBe(false);
+  });
+}
+
+test("discovery errors redact secrets, reject malformed pages and preserve empty results", async () => {
+  for (const status of [401, 403, 429, 500]) {
+    globalThis.fetch = async () => Response.json({ error: { message: credentials.apiKey } }, { status });
+    const response = await listModels(request({ provider: "openai", apiKey: credentials.apiKey }));
+    expect(response.ok).toBe(false);
+    expect(await response.text()).not.toContain(credentials.apiKey);
+  }
+  for (const payload of [null, { data: [{ id: 42 }] }]) {
+    globalThis.fetch = async () => Response.json(payload);
+    expect(await (await listModels(request({ provider: "openai", apiKey: credentials.apiKey }))).text()).toContain("INVALID_OUTPUT");
+  }
+  globalThis.fetch = async () => Response.json({ data: [] });
+  expect((await (await listModels(request({ provider: "openai", apiKey: credentials.apiKey }))).json()).models).toEqual([]);
+});
+
+test("discovery stops repeated cursors, supports cancellation and a 30 second total deadline", async () => {
+  const timeout = AbortSignal.timeout;
+  let count = 0;
+  globalThis.fetch = async () => { count++; return Response.json({ models: [], nextPageToken: "same" }); };
+  expect(await (await listModels(request({ provider: "gemini", apiKey: credentials.apiKey }))).text()).toContain("INVALID_OUTPUT");
+  expect(count).toBe(2);
+  const cancelled = new AbortController(); cancelled.abort();
+  expect(await (await listModels(request({ provider: "openai", apiKey: credentials.apiKey }, cancelled.signal))).text()).toContain("CANCELLED");
+  AbortSignal.timeout = (ms) => {
+    expect(ms).toBe(30000);
+    const controller = new AbortController();
+    queueMicrotask(() => controller.abort(new DOMException("timeout", "TimeoutError")));
+    return controller.signal;
+  };
+  globalThis.fetch = async (_url, options) => new Promise<Response>((_resolve, reject) => {
+    if (options?.signal?.aborted) reject(options.signal.reason);
+    else options?.signal?.addEventListener("abort", () => reject(options.signal?.reason));
+  });
+  try { expect(await (await listModels(request({ provider: "openai", apiKey: credentials.apiKey }))).text()).toContain("TIMEOUT"); }
+  finally { AbortSignal.timeout = timeout; }
+});
+
+test("Qwen presets and invalid requests make no discovery calls", async () => {
+  globalThis.fetch = async () => { throw new Error("unexpected call"); };
+  expect((await (await listModels(request({ provider: "qwen", apiKey: credentials.apiKey }))).json()).source).toBe("preset");
+  for (const body of [{ provider: "unknown", apiKey: credentials.apiKey }, { provider: "openai", apiKey: "" }, { provider: "openai", apiKey: credentials.apiKey, endpoint: "https://example.com" }]) {
+    expect((await listModels(request(body))).status).toBe(400);
+  }
+  const crossOrigin = new Request("http://localhost/api/ai/models", { method: "POST", headers: { origin: "https://example.com", "Content-Type": "application/json" }, body: JSON.stringify(credentials) });
+  expect((await listModels(crossOrigin)).status).toBe(403);
+  expect(() => providerRequest({ ...credentials, model: "__proto__" }, "", "", 128)).toThrow();
+});
+
+test("explicit model capabilities determine token limits and parameters", () => {
+  for (const provider of AI_PROVIDERS) for (const model of provider.models) {
+    const req = providerRequest({ ...credentials, provider: provider.id, model: model.id }, "system", "input", 12000);
+    const body = JSON.parse(JSON.stringify(req.body));
+    if (provider.id === "gemini") expect(body.generationConfig).toEqual({ maxOutputTokens: 12000, thinkingConfig: { thinkingLevel: "minimal" } });
+    else expect(body.max_tokens).toBe(provider.id === "qwen" ? 8192 : 12000);
+    if (provider.id === "openai") expect(body.store).toBe(false);
+    if (provider.id === "deepseek") expect(body.thinking).toEqual({ type: "disabled" });
+    if (model.id === "qwen-plus") expect(body.enable_thinking).toBe(false);
+    if (model.id === "qwen-max") expect(body).not.toHaveProperty("enable_thinking");
+  }
+});
+
+test("cancelling discovery aborts an in-flight vendor request", async () => {
+  const controller = new AbortController();
+  let aborted = false;
+  globalThis.fetch = async (_url, options) => new Promise<Response>((_resolve, reject) => {
+    options?.signal?.addEventListener("abort", () => { aborted = true; reject(options.signal?.reason); });
+    controller.abort();
+  });
+  const response = await listModels(request({ provider: "openai", apiKey: credentials.apiKey }, controller.signal));
+  expect(aborted).toBe(true);
+  expect(await response.text()).toContain("CANCELLED");
 });

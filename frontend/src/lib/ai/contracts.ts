@@ -1,12 +1,22 @@
 import { z } from "zod";
-import { isModelAvailable } from "./catalog";
+import { findProvider, isModelSupported } from "./catalog";
 
 export const MAX_README_CHARS = 100_000;
-export const credentialsSchema = z.object({
-  provider: z.string(),
-  model: z.string(),
+export const storedCredentialsSchema = z.object({
+  provider: z.string().min(1).max(100),
+  model: z.string().min(1).max(256),
   apiKey: z.string().trim().min(1).max(4096).regex(/^[\x21-\x7e]+$/),
-}).strict().refine((value) => isModelAvailable(value.provider, value.model));
+}).strict();
+export const credentialsSchema = storedCredentialsSchema.refine((value) => isModelSupported(value.provider, value.model));
+export const modelListRequestSchema = storedCredentialsSchema.omit({ model: true })
+  .refine((value) => Boolean(findProvider(value.provider)));
+export const modelListResponseSchema = z.object({
+  models: z.array(z.object({ id: z.string().min(1).max(256), name: z.string().min(1).max(256), supported: z.boolean() })).max(10000),
+  source: z.enum(["vendor", "preset"]),
+  queriedAt: z.string().datetime(),
+});
+export type ModelList = z.infer<typeof modelListResponseSchema>;
+export type ModelListRequest = z.infer<typeof modelListRequestSchema>;
 export const readmeRequestSchema = credentialsSchema.safeExtend({
   markdown: z.string().min(1).max(MAX_README_CHARS).refine((value) => value.trim().length > 0),
 });

@@ -2293,3 +2293,7 @@ html[data-theme="dark"] .rank-3 > strong { color: #e89a6a; }
   .ai-readme-tabs { width: 100%; }
   .ai-readme-notice, .ai-readme-progress { padding-inline: 16px; }
 }
+
+.ai-model-refresh { margin-top: 12px; }
+.ai-model-refresh > .ai-button { margin: 0 8px 8px 0; }
+.ai-model-picker a { text-decoration: underline; margin-left: 6px; }

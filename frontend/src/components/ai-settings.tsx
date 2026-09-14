@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, Check, Eye, EyeOff, LoaderCircle, Save, ShieldCheck, Trash2, Wifi, X } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { AiModelPicker } from "./ai-model-picker";
 import { AI_PROVIDERS, findProvider } from "@/lib/ai/catalog";
 import { credentialsSchema } from "@/lib/ai/contracts";
 import { testAiConnection } from "@/lib/ai/client";
@@ -29,6 +30,7 @@ function AiSettingsForm({ returnTo }: { returnTo: string | null }) {
   const provider = findProvider(providerId) ?? AI_PROVIDERS[0];
   const [apiKey, setApiKey] = useState(active?.apiKey ?? "");
   const [model, setModel] = useState<string>(active?.model ?? AI_PROVIDERS[0].models[0].id);
+  const [pickerVersion, setPickerVersion] = useState(0);
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -44,6 +46,7 @@ function AiSettingsForm({ returnTo }: { returnTo: string | null }) {
     const selected = findProvider(id);
     if (!selected) return;
     const draft = drafts.current[id] ?? settings.providers[id];
+    setPickerVersion((value) => value + 1);
     setProviderId(id); setApiKey(draft?.apiKey ?? ""); setModel(draft?.model ?? selected.models[0].id);
     setVisible(false); setError(""); setMessage("");
   }
@@ -58,6 +61,7 @@ function AiSettingsForm({ returnTo }: { returnTo: string | null }) {
   }
 
   function remove() {
+    setPickerVersion((value) => value + 1);
     const next = { ...settings, providers: { ...settings.providers } };
     delete next.providers[providerId];
     if (next.selected === providerId) next.selected = Object.keys(next.providers)[0] ?? null;
@@ -75,7 +79,7 @@ function AiSettingsForm({ returnTo }: { returnTo: string | null }) {
     setBusy(true); setError(""); setMessage("");
     try {
       await testAiConnection(parsed.data, AbortSignal.any([controller.signal, AbortSignal.timeout(100_000)]));
-      if (pending.current === controller) setMessage("连接成功，密钥和模型可用。");
+      if (pending.current === controller) setMessage("连接成功，测试通过：当前密钥和模型已完成实际生成。");
     } catch (cause) {
       if (pending.current === controller) setError(controller.signal.aborted ? "已取消测试。" : (cause instanceof Error && cause.name !== "TypeError" ? cause.message : "连接失败，请检查网络或稍后重试。"));
     } finally { if (pending.current === controller) { pending.current = null; setBusy(false); } }
@@ -98,9 +102,9 @@ function AiSettingsForm({ returnTo }: { returnTo: string | null }) {
         <form onSubmit={(event) => { event.preventDefault(); save(); }}>
           <fieldset disabled={busy}>
             <label htmlFor="ai-key">API Key</label>
-            <div className="ai-key-input"><input id="ai-key" type={visible ? "text" : "password"} value={apiKey} onChange={(event) => { setApiKey(event.target.value); setMessage(""); }} autoComplete="off" spellCheck={false} placeholder="输入你的 API Key" maxLength={4096} />
+            <div className="ai-key-input"><input id="ai-key" type={visible ? "text" : "password"} value={apiKey} onChange={(event) => { setApiKey(event.target.value); setPickerVersion((value) => value + 1); setMessage(""); setError(""); }} autoComplete="off" spellCheck={false} placeholder="输入你的 API Key" maxLength={4096} />
               <button type="button" className="ai-icon-button" onClick={() => setVisible(!visible)} aria-label={visible ? "隐藏密钥" : "显示密钥"} title={visible ? "隐藏密钥" : "显示密钥"}>{visible ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
-            <label htmlFor="ai-model">选择模型</label><select id="ai-model" value={model} onChange={(event) => { setModel(event.target.value); setMessage(""); }}>{provider.models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+            <AiModelPicker key={pickerVersion} providerId={provider.id} apiKey={apiKey} model={model} onChange={(value) => { setModel(value); setMessage(""); setError(""); }} />
             <div className="ai-config-actions"><button className="ai-button" type="button" onClick={test}><Wifi size={16} />测试连接</button><button className="ai-button ai-primary" type="submit"><Save size={16} />保存配置</button><button type="button" className="ai-icon-button ai-delete" onClick={remove} aria-label="删除当前厂商配置" title="删除当前厂商配置"><Trash2 size={17} /></button></div>
           </fieldset>
         </form>

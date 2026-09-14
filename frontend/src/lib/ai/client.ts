@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eventSchema, type AiCredentials, type AiEvent, type AiResult } from "./contracts";
+import { eventSchema, modelListResponseSchema, type ModelListRequest, type ModelList, type AiCredentials, type AiEvent, type AiResult } from "./contracts";
 
 const errorSchema = z.object({ error: z.object({ message: z.string() }) });
 async function post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
@@ -47,4 +47,11 @@ export async function requestReadme(credentials: AiCredentials, markdown: string
     if (!result) throw new Error("连接已中断，未收到完整生成结果，请重试。");
     return result;
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+}
+
+export async function fetchAiModels(credentials: ModelListRequest, signal: AbortSignal): Promise<ModelList> {
+  const response = await post("models", credentials, signal);
+  const parsed = modelListResponseSchema.safeParse(await response.json());
+  if (!parsed.success) throw new Error("模型列表返回无效结果。");
+  return parsed.data;
 }

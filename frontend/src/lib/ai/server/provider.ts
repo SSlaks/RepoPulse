@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { findModelCapability } from "../catalog";
 import type { AiCredentials } from "../contracts";
 import { AiError, publicAiError, upstreamError } from "./errors";
 
@@ -8,16 +9,19 @@ const geminiSchema = z.object({ candidates: z.array(z.object({ finishReason: z.s
 
 export function providerRequest(credentials: AiCredentials, system: string, input: string, maxTokens: number) {
   const { provider, apiKey, model } = credentials;
+  const capability = findModelCapability(provider, model);
+  if (!capability) throw new AiError("INVALID_REQUEST", "所选模型尚未适配，请重新选择模型。", 400);
+  const tokenLimit = Math.min(maxTokens, capability.maxOutputTokens);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (provider === "claude") {
+  if (capability.api === "messages") {
     headers["x-api-key"] = apiKey;
     headers["anthropic-version"] = "2023-06-01";
-    return { url: "https://api.anthropic.com/v1/messages", headers, body: { model, system, max_tokens: maxTokens, messages: [{ role: "user", content: input }] } };
+    return { url: "https://api.anthropic.com/v1/messages", headers, body: { model, system, max_tokens: tokenLimit, ...capability.parameters, messages: [{ role: "user", content: input }] } };
   }
-  if (provider === "gemini") {
+  if (capability.api === "generateContent") {
     headers["x-goog-api-key"] = apiKey;
     return { url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, headers,
-      body: { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: input }] }], generationConfig: { maxOutputTokens: maxTokens, thinkingConfig: { thinkingLevel: "minimal" } } } };
+      body: { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: input }] }], generationConfig: { maxOutputTokens: tokenLimit, ...capability.parameters } } };
   }
   const endpoints: Record<string, string> = {
     openai: "https://api.openai.com/v1/chat/completions",
@@ -27,10 +31,7 @@ export function providerRequest(credentials: AiCredentials, system: string, inpu
   if (!endpoints[provider]) throw new AiError("INVALID_REQUEST", "不支持的模型厂商。", 400);
   headers.Authorization = `Bearer ${apiKey}`;
   return { url: endpoints[provider], headers, body: {
-    model, max_tokens: provider === "qwen" ? Math.min(maxTokens, 8192) : maxTokens, stream: false,
-    ...(provider === "deepseek" ? { thinking: { type: "disabled" } } : {}),
-    ...(provider === "qwen" && model === "qwen-plus" ? { enable_thinking: false } : {}),
-    ...(provider === "openai" ? { store: false } : {}),
+    model, max_tokens: tokenLimit, stream: false, ...capability.parameters,
     messages: [{ role: "system", content: system }, { role: "user", content: input }],
   } };
 }

@@ -1,5 +1,6 @@
-import { credentialsSchema, readmeRequestSchema, type AiEvent } from "../contracts";
+import { credentialsSchema, modelListRequestSchema, readmeRequestSchema, type AiEvent } from "../contracts";
 import { AiError, publicAiError } from "./errors";
+import { discoverModels } from "./models";
 import { callModel } from "./provider";
 import { translateReadme } from "./translate";
 
@@ -36,7 +37,7 @@ function errorResponse(error: unknown) {
 export async function testConnection(request: Request): Promise<Response> {
   try {
     const result = credentialsSchema.safeParse(await readBody(request));
-    if (!result.success) throw new AiError("INVALID_REQUEST", "请填写有效密钥并选择内置模型。", 400);
+    if (!result.success) throw new AiError("INVALID_REQUEST", "请填写有效密钥并选择已适配模型。", 400);
     await callModel(result.data, "Reply with only OK.", "Connection test", request.signal, 128);
     return Response.json({ ok: true }, { headers: HEADERS });
   } catch (error) { return errorResponse(error); }
@@ -45,7 +46,7 @@ export async function testConnection(request: Request): Promise<Response> {
 export async function generateReadme(request: Request): Promise<Response> {
   try {
     const parsed = readmeRequestSchema.safeParse(await readBody(request));
-    if (!parsed.success) throw new AiError("INVALID_REQUEST", "请选择内置模型、填写密钥，并提供不超过 100,000 字符的 README。", 400);
+    if (!parsed.success) throw new AiError("INVALID_REQUEST", "请选择已适配模型、填写密钥，并提供不超过 100,000 字符的 README。", 400);
     const cancellation = new AbortController();
     const signal = AbortSignal.any([request.signal, cancellation.signal, AbortSignal.timeout(600_000)]);
     let closed = false;
@@ -65,5 +66,13 @@ export async function generateReadme(request: Request): Promise<Response> {
       cancel() { closed = true; cancellation.abort(); },
     });
     return new Response(stream, { headers: { ...HEADERS, "Content-Type": "application/x-ndjson; charset=utf-8", "X-Accel-Buffering": "no" } });
+  } catch (error) { return errorResponse(error); }
+}
+
+export async function listModels(request: Request): Promise<Response> {
+  try {
+    const parsed = modelListRequestSchema.safeParse(await readBody(request));
+    if (!parsed.success) throw new AiError("INVALID_REQUEST", "请选择厂商并填写有效 API Key。", 400);
+    return Response.json(await discoverModels(parsed.data, request.signal), { headers: HEADERS });
   } catch (error) { return errorResponse(error); }
 }

@@ -116,3 +116,78 @@ test("README generation can be cancelled without duplicate requests", async ({ p
   await expect(page.getByRole("main").getByRole("alert")).toContainText("已取消生成");
   await expect(page.getByRole("button", { name: "总结翻译" })).toBeEnabled();
 });
+
+test("discovery groups unknown models, keeps selection, and invalidates connection status", async ({ page }) => {
+  await page.goto("/settings/ai");
+  await page.getByRole("button", { name: /OpenAI/ }).click();
+  await page.getByLabel("API Key", { exact: true }).fill("sk-fixture");
+  await page.route("**/api/ai/models", (route) => route.fulfill({ json: { source: "vendor", queriedAt: new Date().toISOString(), models: [{ id: "gpt-4.1-mini", name: "GPT-4.1 mini", supported: true }, { id: "future-model", name: "Future", supported: false }] } }));
+  await page.getByRole("button", { name: "获取模型列表", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("返回 2 个模型");
+  await expect(page.getByLabel("选择模型")).toHaveValue("gpt-4.1-mini");
+  await expect(page.locator('option[value="future-model"]')).toBeDisabled();
+  await expect(page.locator('option[value="gpt-4.1"]')).toContainText("本次未返回");
+  await page.route("**/api/ai/test", (route) => route.fulfill({ json: { ok: true } }));
+  await page.getByRole("button", { name: "测试连接", exact: true }).click();
+  await expect(page.getByText(/连接成功，测试通过/)).toBeVisible();
+  await page.getByLabel("选择模型").selectOption("gpt-4.1");
+  await expect(page.getByText(/连接成功，测试通过/)).toHaveCount(0);
+  await page.getByLabel("API Key", { exact: true }).fill("sk-other");
+  await expect(page.locator('option[value="future-model"]')).toHaveCount(0);
+  await page.unroute("**/api/ai/models");
+  await page.route("**/api/ai/models", (route) => route.fulfill({ status: 401, json: { error: { message: "API Key 无效" } } }));
+  await page.getByRole("button", { name: "获取模型列表", exact: true }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("已保留推荐预设");
+  await expect(page.getByLabel("选择模型")).toHaveValue("gpt-4.1");
+});
+
+test("legacy models survive reload and Qwen clearly uses mainland presets", async ({ page }) => {
+  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ selected: "openai", providers: { openai: { provider: "openai", model: "retired-model", apiKey: "sk-legacy" }, deepseek: { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-other" } } })), { key: AI_STORAGE_KEY });
+  await page.goto("/settings/ai");
+  await expect(page.getByLabel("选择模型")).toHaveValue("retired-model");
+  await expect(page.getByText("已保存的模型需重新选择；密钥和其他厂商配置仍保留。")).toBeVisible();
+  await expect(page.getByLabel("API Key", { exact: true })).toHaveValue("sk-legacy");
+  await page.getByRole("button", { name: /DeepSeek/ }).click();
+  await expect(page.getByLabel("API Key", { exact: true })).toHaveValue("sk-other");
+  await page.getByRole("button", { name: /通义千问/ }).click();
+  await expect(page.getByText(/来源：官方文档维护的中国内地预设/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "获取模型列表", exact: true })).toHaveCount(0);
+});
+
+test("switching providers discards a pending discovery response", async ({ page }) => {
+  let release: (() => void) | undefined;
+  await page.route("**/api/ai/models", async (route) => {
+    await new Promise<void>((resolve) => { release = resolve; });
+    await route.fulfill({ json: { source: "vendor", queriedAt: new Date().toISOString(), models: [{ id: "stale-model", name: "Stale", supported: false }] } }).catch(() => undefined);
+  });
+  await page.goto("/settings/ai");
+  await page.getByLabel("API Key", { exact: true }).fill("sk-fixture");
+  await page.getByRole("button", { name: "获取模型列表", exact: true }).click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await page.getByRole("button", { name: /OpenAI/ }).click();
+  release?.();
+  await expect(page.getByLabel("选择模型")).toHaveValue("gpt-4.1-mini");
+  await expect(page.locator('option[value="stale-model"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "获取模型列表", exact: true })).toBeEnabled();
+});
+
+test("empty discovery and explicit cancellation retain presets", async ({ page }) => {
+  await page.goto("/settings/ai");
+  await page.getByLabel("API Key", { exact: true }).fill("sk-fixture");
+  await page.route("**/api/ai/models", (route) => route.fulfill({ json: { source: "vendor", queriedAt: new Date().toISOString(), models: [] } }));
+  await page.getByRole("button", { name: "获取模型列表", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("未返回模型");
+  await expect(page.getByLabel("选择模型")).toHaveValue("deepseek-flash");
+  await page.unroute("**/api/ai/models");
+  let release: (() => void) | undefined;
+  await page.route("**/api/ai/models", async (route) => {
+    await new Promise<void>((resolve) => { release = resolve; });
+    await route.abort().catch(() => undefined);
+  });
+  await page.getByRole("button", { name: "获取模型列表", exact: true }).click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await page.getByRole("button", { name: "取消查询" }).click();
+  release?.();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("已取消模型查询");
+  await expect(page.getByLabel("选择模型")).toHaveValue("deepseek-flash");
+});
