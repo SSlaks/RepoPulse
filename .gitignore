@@ -12,6 +12,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.omo/
 repopulse.db
 *.sqlite3
 coverage.xml
