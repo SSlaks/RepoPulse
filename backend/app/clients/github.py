@@ -14,6 +14,20 @@ from app.config import get_settings
 
 
 class GitHubClientError(RuntimeError):
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class GitHubNotFoundError(GitHubClientError):
+    pass
+
+
+class GitHubAuthenticationError(GitHubClientError):
+    pass
+
+
+class GitHubPermissionError(GitHubClientError):
     pass
 
 
@@ -269,8 +283,14 @@ class GitHubClient:
                 "GitHub API rate limit reached", _retry_after(response), secondary=not exhausted
             )
         if response.status_code >= 500:
-            raise GitHubTransientError(f"GitHub request failed: {response.status_code}")
+            raise GitHubTransientError(f"GitHub request failed: {response.status_code}",
+                                       response.status_code)
+        errors = {401: GitHubAuthenticationError, 403: GitHubPermissionError,
+                  404: GitHubNotFoundError}
+        if error := errors.get(response.status_code):
+            raise error(f"GitHub request failed: {response.status_code}", response.status_code)
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise GitHubClientError(f"GitHub request failed: {response.status_code}") from exc
+            raise GitHubClientError(f"GitHub request failed: {response.status_code}",
+                                    response.status_code) from exc

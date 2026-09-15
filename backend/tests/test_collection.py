@@ -9,20 +9,21 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-from worker.app import tasks
-from worker.app.collection import RepositoryRequests
-from worker.app.snapshots import SnapshotCancelled, SnapshotCollector, SnapshotIncomplete
-
 from app.clients.github import (
     GitHubClient,
     GitHubClientError,
+    GitHubPermissionError,
     GitHubRateLimitError,
     GitHubRepositoryData,
 )
 from app.config import Settings
 from app.models import Base, JobRun, Repository, RepoSnapshot
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
+from worker.app import tasks
+from worker.app.collection import RepositoryRequests
+from worker.app.snapshots import SnapshotCancelled, SnapshotCollector, SnapshotIncomplete
 
 AS_OF = datetime(2026, 9, 10, 2, tzinfo=UTC)
 KEY = "snapshot:all:2026-09-10"
@@ -50,6 +51,7 @@ def database(tmp_path, monkeypatch):
                            status="running", attempts=1, started_at=AS_OF))
         session.commit()
     monkeypatch.setattr(tasks, "get_sync_session", factory)
+    monkeypatch.setattr(tasks, "_validate_capture_date", lambda _: None)
     monkeypatch.setattr("worker.app.snapshots.get_settings", lambda: Settings(
         snapshot_concurrency=4, snapshot_requests_per_second=10, snapshot_batch_size=3,
     ))
@@ -144,7 +146,7 @@ def test_permission_error_is_not_rate_limit():
     try:
         with pytest.raises(GitHubClientError) as exc:
             client.repository("owner/repo")
-        assert type(exc.value) is GitHubClientError
+        assert type(exc.value) is GitHubPermissionError
     finally:
         client.close()
 
@@ -259,42 +261,33 @@ def test_success_exhausting_quota_stops_next_request():
 
 
 def test_retry_pins_date_and_does_not_publish_rankings(database, monkeypatch):
-    from celery.exceptions import Retry
     monkeypatch.setattr(tasks, "_task_lock", lambda *args, **kwargs: nullcontext(True))
     monkeypatch.setattr(tasks, "_parse_as_of", lambda _: AS_OF)
     capture = Mock(side_effect=GitHubRateLimitError("exhausted", 125))
     monkeypatch.setattr(tasks, "_capture_snapshots", capture)
-    retry = Mock(side_effect=Retry())
-    monkeypatch.setattr(tasks.capture_daily_snapshots, "retry", retry)
-    chain = Mock()
-    monkeypatch.setattr(tasks, "chain", chain)
-    with pytest.raises(Retry):
-        tasks.capture_daily_snapshots.run()
-    assert retry.call_args.kwargs["args"] == (AS_OF.isoformat(),)
-    assert retry.call_args.kwargs["countdown"] == 125
-    assert not chain.called
+    publish = Mock()
+    monkeypatch.setattr(tasks.publish_daily_rankings, "delay", publish)
+    assert tasks.capture_daily_snapshots.run()["status"] == "waiting"
+    assert not publish.called
     with database() as session:
         job = session.scalar(select(JobRun))
         assert job.status == "waiting"
         assert job.progress["wait_reason"] == "quota_exhausted"
         assert "resume_at" in job.progress
+        assert job.progress["quota_retries"] == 1
 
 
 @pytest.mark.parametrize("error,status", [
-    (SnapshotIncomplete("one failure"), "failed"),
+    (SnapshotIncomplete("one failure"), "partial"),
     (SnapshotCancelled("cancelled"), "cancelled"),
 ])
 def test_unsuccessful_collection_never_publishes(database, monkeypatch, error, status):
     monkeypatch.setattr(tasks, "_task_lock", lambda *args, **kwargs: nullcontext(True))
     monkeypatch.setattr(tasks, "_capture_snapshots", Mock(side_effect=error))
-    chain = Mock()
-    monkeypatch.setattr(tasks, "chain", chain)
-    if status == "failed":
-        with pytest.raises(SnapshotIncomplete):
-            tasks.capture_daily_snapshots.run(AS_OF.isoformat())
-    else:
-        assert tasks.capture_daily_snapshots.run(AS_OF.isoformat())["status"] == "cancelled"
-    assert not chain.called
+    publish = Mock()
+    monkeypatch.setattr(tasks.publish_daily_rankings, "delay", publish)
+    assert tasks.capture_daily_snapshots.run(AS_OF.isoformat())["status"] == status
+    assert not publish.called
     with database() as session:
         assert session.scalar(select(JobRun.status)) == status
 
@@ -302,11 +295,10 @@ def test_unsuccessful_collection_never_publishes(database, monkeypatch, error, s
 def test_completed_snapshot_publishes_four_rankings(database, monkeypatch):
     monkeypatch.setattr(tasks, "_task_lock", lambda *args, **kwargs: nullcontext(True))
     monkeypatch.setattr(tasks, "_capture_snapshots", Mock(return_value=8))
-    chain = Mock()
-    monkeypatch.setattr(tasks, "chain", chain)
+    publish = Mock()
+    monkeypatch.setattr(tasks.publish_daily_rankings, "delay", publish)
     assert tasks.capture_daily_snapshots.run(AS_OF.isoformat())["status"] == "ok"
-    assert [signature.args[0] for signature in chain.call_args.args] == [1, 7, 14, 30]
-    chain.return_value.delay.assert_called_once()
+    publish.assert_called_once_with(AS_OF.isoformat(), automatic=True)
 
 
 def test_cancelled_delayed_task_does_not_restart(database, monkeypatch):

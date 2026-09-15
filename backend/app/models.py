@@ -43,6 +43,15 @@ class Repository(Base):
     is_fork: Mapped[bool] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    availability_status: Mapped[str] = mapped_column(String(20), default="active")
+    consecutive_not_found: Mapped[int] = mapped_column(Integer, default=0)
+    first_not_found_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_not_found_date: Mapped[date | None] = mapped_column(Date)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_probe_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    probe_backoff_step: Mapped[int] = mapped_column(Integer, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(String(40))
     pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     github_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_tracked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -152,3 +161,22 @@ class JobRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     progress: Mapped[dict] = mapped_column(JSON, default=dict)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class SnapshotRequest(Base):
+    __tablename__ = "snapshot_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_run_id: Mapped[int] = mapped_column(ForeignKey("job_runs.id", ondelete="CASCADE"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    error_code: Mapped[str | None] = mapped_column(String(40))
+    error_message: Mapped[str | None] = mapped_column(String(2000))
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    availability_applied: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_run_id", "repository_id", name="uq_snapshot_request_repo"),
+    )

@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 SUPPORTED_PERIODS = (1, 7, 14, 30)
-BASELINE_TOLERANCE = timedelta(hours=36)
 
 
 @dataclass(frozen=True)
@@ -93,4 +92,4 @@ def _find_baseline(snapshots: list[SnapshotPoint], target: datetime) -> Snapshot
     if not candidates:
         return None
     baseline = candidates[-1]
-    return baseline if target - baseline.captured_at <= BASELINE_TOLERANCE else None
+    return baseline if baseline.captured_at.date() == target.date() else None

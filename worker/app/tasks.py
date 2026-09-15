@@ -5,12 +5,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import httpx
-from celery import Task, chain
-from redis import Redis
-from redis.exceptions import LockError, RedisError
-from sqlalchemy import delete, select
-from sqlalchemy.engine import CursorResult
-
 from app.clients.github import GitHubClient, GitHubClientError, GitHubRateLimitError
 from app.config import get_settings
 from app.database import get_sync_session
@@ -21,8 +15,15 @@ from app.models import (
     RankingRun,
     Repository,
     RepoSnapshot,
+    SnapshotRequest,
 )
 from app.ranking.calculator import RepositorySeries, SnapshotPoint, calculate_ranking
+from celery import Task
+from redis import Redis
+from redis.exceptions import LockError, RedisError
+from sqlalchemy import delete, select, true
+from sqlalchemy.engine import CursorResult
+
 from worker.app.celery_app import celery_app
 from worker.app.snapshots import (
     SnapshotCancelled,
@@ -31,6 +32,103 @@ from worker.app.snapshots import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@celery_app.task(name="worker.app.tasks.recover_collections")
+def recover_collections() -> dict[str, int]:
+    from worker.app.recovery import dispatch_recovery
+    return {"dispatched": dispatch_recovery()}
+
+
+@celery_app.task(soft_time_limit=7200, time_limit=7260,
+                 name="worker.app.tasks.probe_quarantined_repositories")
+def probe_quarantined_repositories() -> dict[str, int]:
+    from worker.app.probes import probe_repositories
+    return probe_repositories()
+
+
+def _validate_capture_date(captured_at: datetime) -> None:
+    if captured_at.astimezone(UTC).date() != datetime.now(UTC).date():
+        raise ValueError("Live collection only supports the current UTC date")
+
+
+def _mark_publication_pending(job_key: str) -> None:
+    with get_sync_session() as session:
+        job = session.scalars(select(JobRun).where(JobRun.job_key == job_key)).one()
+        job.progress = dict(job.progress or {}, publication="pending")
+        session.commit()
+
+
+def _schedule_snapshot_quota(job_key: str, error: GitHubRateLimitError) -> bool:
+    with get_sync_session() as session:
+        job = session.scalars(select(JobRun).where(JobRun.job_key == job_key)).one()
+        progress = dict(job.progress or {})
+        retries = progress.get("quota_retries", 0)
+        if retries >= 5:
+            return False
+        progress["quota_retries"] = retries + 1
+        job.progress = progress
+        session.commit()
+    _wait_for_quota(job_key, error)
+    return True
+
+
+@celery_app.task(soft_time_limit=3300, time_limit=3360,
+                 name="worker.app.tasks.publish_daily_rankings")
+def publish_daily_rankings(as_of: str, automatic: bool = False) -> dict[str, int | str]:
+    captured_at = _parse_as_of(as_of)
+    key = f"snapshot:all:{captured_at.date().isoformat()}"
+    with _task_lock(f"publish:{key}", timeout=3600, required=True) as acquired:
+        if not acquired:
+            return {"status": "duplicate", "count": 0}
+        with get_sync_session() as session:
+            job = session.scalar(select(JobRun).where(JobRun.job_key == key))
+            if not job or job.cancel_requested or job.status != "completed":
+                return {"status": "blocked", "count": 0}
+            if job.progress.get("publication") == "published":
+                return {"status": "duplicate", "count": 0}
+            attempts = job.progress.get("publication_attempts", 0)
+            if automatic and attempts >= 5:
+                job.progress = dict(job.progress, publication="failed")
+                session.commit()
+                return {"status": "failed", "count": 0}
+            rows = session.scalars(select(SnapshotRequest).where(
+                SnapshotRequest.job_run_id == job.id)).all()
+            if not rows or any(row.status != "saved" for row in rows):
+                job.progress = dict(job.progress, publication="blocked",
+                                    publication_reason="missing_request_results")
+                session.commit()
+                return {"status": "blocked", "count": 0}
+            ids = [row.repository_id for row in rows]
+            saved = set(session.scalars(select(RepoSnapshot.repository_id).where(
+                RepoSnapshot.snapshot_date == captured_at.date(),
+                RepoSnapshot.source == "github_api")))
+            if not set(ids).issubset(saved):
+                job.progress = dict(job.progress, publication="blocked",
+                                    publication_reason="missing_daily_snapshots")
+                session.commit()
+                return {"status": "blocked", "count": 0}
+            job.progress = dict(job.progress, publication_attempts=attempts + 1)
+            session.commit()
+            try:
+                # Remove an older/manual batch inside the same transaction as its replacement.
+                old_ids = list(session.scalars(select(RankingRun.id).where(
+                    RankingRun.as_of == captured_at, RankingRun.period_days.in_((1, 7, 14, 30)))))
+                session.execute(delete(RankingItem).where(RankingItem.ranking_run_id.in_(old_ids)))
+                session.execute(delete(RankingRun).where(RankingRun.id.in_(old_ids)))
+                count = sum(_persist_ranking(session, period, captured_at, ids)
+                            for period in (1, 7, 14, 30))
+                if not count:
+                    raise ValueError("No eligible repositories for publication")
+                job.progress = dict(job.progress, publication="published", publication_error=None)
+                session.commit()
+                return {"status": "ok", "count": count}
+            except Exception as exc:
+                session.rollback()
+                job.progress = dict(job.progress, publication="pending" if attempts < 4 else "failed",
+                                    publication_error=str(exc)[:2000])
+                session.commit()
+                raise
 
 
 class GitHubTask(Task):
@@ -83,39 +181,46 @@ def hydrate_repositories(self: GitHubTask, repo_names: list[str]) -> dict[str, i
     bind=True, max_retries=5, soft_time_limit=7_200, time_limit=7_260,
     name="worker.app.tasks.capture_daily_snapshots",
 )
-def capture_daily_snapshots(self: Task, as_of: str | None = None) -> dict[str, int | str]:
-    captured_at = _parse_as_of(as_of)
+def capture_daily_snapshots(
+    self: Task, as_of: str | None = None, automatic: bool = False,
+) -> dict[str, int | str]:
+    captured_at = _parse_as_of(as_of).astimezone(UTC).replace(
+        hour=2, minute=0, second=0, microsecond=0)
+    _validate_capture_date(captured_at)
     job_key = f"snapshot:all:{captured_at.date().isoformat()}"
-    with _task_lock(job_key, timeout=7_800, required=True) as acquired:
-        if not acquired or not _start_job(job_key, "capture_daily_snapshots"):
+    with (_task_lock("repository-collection", timeout=7_800, required=True) as collection_lock,
+          _task_lock(job_key, timeout=7_800, required=True) as acquired):
+        if not collection_lock or not acquired:
+            return {"status": "duplicate", "count": 0}
+        if automatic:
+            from worker.app.recovery import automatic_capture_ready
+            if not automatic_capture_ready(job_key):
+                return {"status": "duplicate", "count": 0}
+        if not _start_job(job_key, "capture_daily_snapshots"):
             return {"status": "duplicate", "count": 0}
         try:
-            count = _capture_snapshots(captured_at)
+            count = _capture_snapshots(captured_at, automatic=automatic)
             if _job_cancelled(job_key):
                 raise SnapshotCancelled("Cancelled at user request")
-            workflow = chain(
-                build_ranking.si(1, captured_at.isoformat()),
-                build_ranking.si(7, captured_at.isoformat()),
-                build_ranking.si(14, captured_at.isoformat()),
-                build_ranking.si(30, captured_at.isoformat()),
-            )
-            workflow.delay()
+            _mark_publication_pending(job_key)
             _finish_job(job_key, "completed")
+            try:
+                publish_daily_rankings.delay(captured_at.isoformat(), automatic=True)
+            except Exception:
+                # The committed pending publication is dispatched again by recovery.
+                logger.exception("Publication enqueue failed", extra={"job_key": job_key})
             return {"status": "ok", "count": count}
         except SnapshotCancelled as exc:
             _finish_job(job_key, "cancelled", str(exc))
             return {"status": "cancelled", "count": 0}
         except GitHubRateLimitError as exc:
-            if self.request.retries >= self.max_retries:
+            if not _schedule_snapshot_quota(job_key, exc):
                 _finish_job(job_key, "failed", "Rate limit retries exhausted")
                 raise
-            _wait_for_quota(job_key, exc)
-            raise self.retry(
-                exc=exc, args=(captured_at.isoformat(),), kwargs={}, countdown=exc.retry_after,
-            )
+            return {"status": "waiting", "count": 0}
         except SnapshotIncomplete as exc:
-            _finish_job(job_key, "failed", str(exc))
-            raise
+            from worker.app.recovery import finish_partial
+            return finish_partial(job_key, str(exc))
         except Exception as exc:
             _finish_job(job_key, "failed", str(exc))
             raise
@@ -123,35 +228,10 @@ def capture_daily_snapshots(self: Task, as_of: str | None = None) -> dict[str, i
 
 @celery_app.task(name="worker.app.tasks.build_ranking")
 def build_ranking(period_days: int, as_of: str | None = None) -> dict[str, int | str]:
-    captured_at = _parse_as_of(as_of)
-    job_key = f"ranking:{period_days}:{captured_at.date().isoformat()}:v1"
-    with _task_lock(job_key, timeout=3_600) as acquired:
-        if not acquired:
-            return {"status": "duplicate", "count": 0}
-        with get_sync_session() as session:
-            existing_job = session.scalar(select(JobRun).where(JobRun.job_key == job_key))
-            if existing_job and existing_job.status == "completed":
-                return {"status": "duplicate", "count": 0}
-            job = existing_job or JobRun(
-                job_key=job_key,
-                task_name="build_ranking",
-                status="running",
-                attempts=0,
-                started_at=datetime.now(UTC),
-            )
-            session.add(job)
-            job.attempts += 1
-            try:
-                count = _persist_ranking(session, period_days, captured_at)
-                job.status = "completed"
-                job.finished_at = datetime.now(UTC)
-                session.commit()
-                return {"status": "ok", "count": count}
-            except Exception as exc:
-                session.rollback()
-                logger.exception("Ranking build failed", extra={"period_days": period_days})
-                _record_failed_job(job_key, "build_ranking", str(exc))
-                raise
+    if period_days not in (1, 7, 14, 30):
+        raise ValueError("unsupported ranking period")
+    # Legacy callers now pass through the same completeness gate and atomic batch.
+    return publish_daily_rankings(_parse_as_of(as_of).isoformat())
 
 
 @celery_app.task(name="worker.app.tasks.cleanup_failed_jobs")
@@ -289,9 +369,10 @@ def _upsert_repository(session, data, repository: Repository | None = None) -> N
     repository.last_seen_at = now
 
 
-def _capture_snapshots(captured_at: datetime) -> int:
+def _capture_snapshots(captured_at: datetime, automatic: bool = False) -> int:
     return SnapshotCollector(
         captured_at, get_sync_session, GitHubClient, _upsert_repository,
+        automatic=automatic,
     ).run()
 
 
@@ -313,12 +394,15 @@ def _wait_for_quota(job_key: str, error: GitHubRateLimitError) -> None:
             session.commit()
 
 
-def _persist_ranking(session, period_days: int, as_of: datetime) -> int:
+def _persist_ranking(session, period_days: int, as_of: datetime,
+                     repository_ids: list[int] | None = None) -> int:
     repositories = session.scalars(
         select(Repository).where(
             Repository.is_fork.is_(False),
             Repository.archived.is_(False),
             Repository.disabled.is_(False),
+            Repository.availability_status != "quarantined",
+            Repository.id.in_(repository_ids) if repository_ids is not None else true(),
         )
     ).all()
     series = []
@@ -327,20 +411,23 @@ def _persist_ranking(session, period_days: int, as_of: datetime) -> int:
             select(RepoSnapshot)
             .where(
                 RepoSnapshot.repository_id == repository.id,
-                RepoSnapshot.captured_at <= as_of,
+                RepoSnapshot.snapshot_date <= as_of.date(),
                 RepoSnapshot.source == "github_api",
             )
             .order_by(RepoSnapshot.captured_at)
         ).all()
+        if not any(snapshot.snapshot_date == as_of.date() for snapshot in snapshots):
+            continue
         series.append(
                 RepositorySeries(
                     repository_id=repository.id,
                     full_name=repository.full_name,
                 snapshots=tuple(
-                    SnapshotPoint(snapshot.captured_at, snapshot.stars_count)
+                    SnapshotPoint(datetime.combine(snapshot.snapshot_date, as_of.timetz()),
+                                  snapshot.stars_count)
                         for snapshot in snapshots
                     ),
-                    current_stars=repository.stars_count,
+                    current_stars=None,
                 )
         )
     results = calculate_ranking(series, period_days, as_of)
@@ -432,6 +519,10 @@ def _start_job(job_key: str, task_name: str) -> bool:
             session.add(job)
         job.progress = {k: v for k, v in (job.progress or {}).items()
                         if k not in {"wait_reason", "resume_at"}}
+        if task_name == "capture_daily_snapshots":
+            from worker.app.checkpoints import initialize_progress
+            day = datetime.fromisoformat(job_key.rsplit(":", 1)[-1]).replace(tzinfo=UTC, hour=2)
+            job.progress = initialize_progress(job.progress, day, get_settings())
         job.status = "running"
         job.attempts += 1
         job.error_message = None

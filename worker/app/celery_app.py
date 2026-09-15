@@ -1,8 +1,7 @@
 import sentry_sdk
+from app.config import get_settings
 from celery import Celery
 from celery.schedules import crontab
-
-from app.config import get_settings
 
 settings = get_settings()
 
@@ -28,6 +27,14 @@ celery_app.conf.update(
     task_track_started=True,
     broker_connection_retry_on_startup=True,
     beat_schedule={
+        "recover-collections": {
+            "task": "worker.app.tasks.recover_collections",
+            "schedule": crontab(minute="*/5"),
+        },
+        "probe-quarantined-repositories": {
+            "task": "worker.app.tasks.probe_quarantined_repositories",
+            "schedule": crontab(minute=40),
+        },
         "discover-candidates-daily": {
             "task": "worker.app.tasks.discover_candidates",
             "schedule": crontab(minute=15, hour=0),

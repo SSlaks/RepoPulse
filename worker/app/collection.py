@@ -6,8 +6,8 @@ from threading import Event, Lock, local
 from time import monotonic, time
 
 import httpx
-
 from app.clients.github import (
+    GitHubAuthenticationError,
     GitHubClient,
     GitHubRateLimitError,
     GitHubRepositoryData,
@@ -29,6 +29,7 @@ class RepositoryRequests:
         self._next_start = 0.0
         self.stopped = Event()
         self.rate_limit: GitHubRateLimitError | None = None
+        self.authentication_error: GitHubAuthenticationError | None = None
 
     def submit(self, name: str) -> Future[GitHubRepositoryData | None]:
         return self._executor.submit(self._fetch, name)
@@ -85,6 +86,10 @@ class RepositoryRequests:
                 return data
             except GitHubRateLimitError as exc:
                 self._set_rate_limit(exc)
+                raise
+            except GitHubAuthenticationError as exc:
+                self.authentication_error = exc
+                self.stop()
                 raise
             except (httpx.RequestError, GitHubTransientError):
                 if attempt == 3:

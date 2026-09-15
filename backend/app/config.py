@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     candidate_topics: str = "ai,llm,developer-tools,database,web-framework,self-hosted"
     manual_seed_repositories: str = ""
     excluded_repositories: str = ""
+    repository_auto_quarantine: bool = False
+    repository_probe_enabled: bool = True
+    snapshot_deadline_hours: int = Field(default=6, ge=1, le=23)
     max_active_repositories: int = 5000
     github_search_pages: int = 2
     snapshot_concurrency: int = Field(default=4, ge=1, le=16)
