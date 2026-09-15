@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/avatars/{owner_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Avatar */
+        get: operations["get_avatar_api_v1_avatars__owner_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/repos/{owner}/{name}": {
         parameters: {
             query?: never;
@@ -30,6 +47,23 @@ export interface paths {
         };
         /** Get Repository */
         get: operations["get_repository_api_v1_repos__owner___name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/repos/{owner}/{name}/readme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Repository Readme */
+        get: operations["get_repository_readme_api_v1_repos__owner___name__readme_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -110,6 +144,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CollectionSummary */
+        CollectionSummary: {
+            /** Expected */
+            expected: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Missing */
+            missing: number;
+            /** Completeness Percent */
+            completeness_percent: number;
+            /** Is Partial */
+            is_partial: boolean;
+        };
         /** FilterOption */
         FilterOption: {
             /** Value */
@@ -156,6 +203,7 @@ export interface components {
             full_name: string;
             /** Owner */
             owner: string;
+            /** Owner Github Id */
             owner_github_id?: number | null;
             /** Name */
             name: string;
@@ -206,6 +254,7 @@ export interface components {
              * @enum {string}
              */
             data_mode: "demo" | "live";
+            collection?: components["schemas"]["CollectionSummary"] | null;
         };
         /** RankingResponse */
         RankingResponse: {
@@ -213,12 +262,24 @@ export interface components {
             data: components["schemas"]["RankingItemResponse"][];
             meta: components["schemas"]["RankingMeta"];
         };
+        /** ReadmeResponse */
+        ReadmeResponse: {
+            /** Repository */
+            repository: string;
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Html Url */
+            html_url: string;
+        };
         /** RepositoryResponse */
         RepositoryResponse: {
             /** Full Name */
             full_name: string;
             /** Owner */
             owner: string;
+            /** Owner Github Id */
             owner_github_id?: number | null;
             /** Name */
             name: string;
@@ -341,6 +402,37 @@ export interface operations {
             };
         };
     };
+    get_avatar_api_v1_avatars__owner_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                owner_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_repository_api_v1_repos__owner___name__get: {
         parameters: {
             query?: never;
@@ -360,6 +452,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RepositoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_repository_readme_api_v1_repos__owner___name__readme_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                owner: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadmeResponse"];
                 };
             };
             /** @description Validation Error */

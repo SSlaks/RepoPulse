@@ -17,6 +17,7 @@ class CatalogRepository:
             .where(RankingRun.period_days == period_days, RankingRun.status == "ready")
             .order_by(RankingRun.as_of.desc())
             .limit(1)
+            .with_for_update(read=True)
         )
         return await self._session.scalar(query)
 

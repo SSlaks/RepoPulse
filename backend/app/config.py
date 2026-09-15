@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     repository_auto_quarantine: bool = False
     repository_probe_enabled: bool = True
     snapshot_deadline_hours: int = Field(default=6, ge=1, le=23)
+    ranking_min_completeness_percent: int = Field(default=95, ge=1, le=100)
     max_active_repositories: int = 5000
     github_search_pages: int = 2
     snapshot_concurrency: int = Field(default=4, ge=1, le=16)

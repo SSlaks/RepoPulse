@@ -131,10 +131,18 @@ export function RankingExplorer({
                 </button>
               ))}
             </div>
+            <div className="coverage-status">
             <p className="coverage-copy">
               <Database size={15} />
               当前覆盖 <strong>{formatNumber(data?.meta.coverage ?? 0)}</strong> 个候选仓库
             </p>
+            {data?.meta.collection && (
+              <p className={`collection-completeness${data.meta.collection.is_partial ? " is-partial" : ""}`} role="status">
+                已更新 {formatNumber(data.meta.collection.succeeded)} / {formatNumber(data.meta.collection.expected)} 个仓库
+                {data.meta.collection.is_partial && `，${formatNumber(data.meta.collection.missing)} 个暂不可用`}
+              </p>
+            )}
+            </div>
           </div>
 
           <div className="stat-strip">

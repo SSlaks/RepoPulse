@@ -25,8 +25,8 @@ function rankingParams(filters: RankingFilters): URLSearchParams {
   return params;
 }
 
-async function getJson<T>(url: string, revalidate = 300): Promise<T> {
-  const response = await fetch(url, { next: { revalidate } });
+async function getJson<T>(url: string, revalidate: number | null = 300): Promise<T> {
+  const response = await fetch(url, revalidate === null ? { cache: "no-store" } : { next: { revalidate } });
   if (!response.ok) {
     let message = "数据服务暂时不可用";
     try {
@@ -46,7 +46,7 @@ export function rankingApiUrl(filters: RankingFilters, client = false): string {
 }
 
 export async function fetchRankings(filters: RankingFilters): Promise<RankingResponse> {
-  return getJson<RankingResponse>(rankingApiUrl(filters));
+  return getJson<RankingResponse>(rankingApiUrl(filters), null);
 }
 
 export async function fetchFilters(): Promise<FilterResponse> {

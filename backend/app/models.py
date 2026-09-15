@@ -110,6 +110,8 @@ class RankingRun(Base):
     baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     config_version: Mapped[str] = mapped_column(String(40), default="v1")
     status: Mapped[str] = mapped_column(String(20), default="ready")
+    collection_summary: Mapped[dict | None] = mapped_column(JSON)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     items: Mapped[list["RankingItem"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"

@@ -159,7 +159,10 @@ def test_publication_automatic_attempts_are_bounded(environment, monkeypatch):
     with factory() as session:
         job = session.scalar(select(JobRun))
         job.status = "completed"
-        job.progress = dict(job.progress, publication="pending", publication_attempts=5)
+        from worker.app.publication import candidate
+        version = candidate(session, job, now, 95).fingerprint
+        job.progress = dict(job.progress, publication="pending",
+                            publication_attempts_by_version={version: 5})
         session.commit()
     persist = Mock()
     monkeypatch.setattr(tasks, "_persist_ranking", persist)

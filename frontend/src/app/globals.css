@@ -2314,6 +2314,24 @@ html[data-theme="dark"] .rank-3 > strong { color: #e89a6a; }
   .ai-readme-progress-meter { grid-column: 1 / -1; }
 }
 
+.coverage-status {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.collection-completeness {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.collection-completeness.is-partial {
+  color: #956414;
+}
+
 .ai-model-refresh { margin-top: 12px; }
 .ai-model-refresh > .ai-button { margin: 0 8px 8px 0; }
 .ai-model-picker a { text-decoration: underline; margin-left: 6px; }

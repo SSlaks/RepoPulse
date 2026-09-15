@@ -32,6 +32,14 @@ class RankingItemResponse(BaseModel):
     github_url: str
 
 
+class CollectionSummary(BaseModel):
+    expected: int
+    succeeded: int
+    missing: int
+    completeness_percent: float
+    is_partial: bool
+
+
 class RankingMeta(BaseModel):
     period_days: PeriodDays
     as_of: datetime
@@ -42,6 +50,7 @@ class RankingMeta(BaseModel):
     page: int
     limit: int
     data_mode: Literal["demo", "live"]
+    collection: CollectionSummary | None = None
 
 
 class RankingResponse(BaseModel):

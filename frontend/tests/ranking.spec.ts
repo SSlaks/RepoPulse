@@ -271,7 +271,8 @@ test("头像首次未缓存时会退避重试并自动恢复", async ({ page }) 
     { owner: "avatar-owner", name: "retry-success", ownerGithubId: 987654321 },
   ]);
 
-  const avatar = page.getByAltText("avatar-owner 头像").first();
+  const avatar = page.locator('img[alt="avatar-owner 头像"]:visible').first();
+  await avatar.scrollIntoViewIfNeeded();
   await expect(avatar).toHaveAttribute("src", "/avatar-fallback.svg");
   await page.clock.fastForward(1_000);
 
@@ -291,8 +292,9 @@ test("头像重试耗尽或缺少 owner ID 时保持默认图", async ({ page })
     { owner: "unknown-owner", name: "no-owner-id", ownerGithubId: null },
   ]);
 
-  const missingAvatar = page.getByAltText("missing-owner 头像").first();
-  const unknownAvatar = page.getByAltText("unknown-owner 头像").first();
+  const missingAvatar = page.locator('img[alt="missing-owner 头像"]:visible').first();
+  const unknownAvatar = page.locator('img[alt="unknown-owner 头像"]:visible').first();
+  await missingAvatar.scrollIntoViewIfNeeded();
   await expect(missingAvatar).toHaveAttribute("src", "/avatar-fallback.svg");
   await expect(unknownAvatar).toHaveAttribute("src", "/avatar-fallback.svg");
 

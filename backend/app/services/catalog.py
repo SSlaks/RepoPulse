@@ -11,6 +11,7 @@ from app.models import RankingItem, Repository
 from app.repositories.catalog import CatalogRepository
 from app.schemas import (
     ChartRange,
+    CollectionSummary,
     FilterOption,
     FilterResponse,
     PeriodDays,
@@ -42,20 +43,21 @@ class CatalogService:
         limit: int,
     ) -> RankingResponse:
         environment = get_settings().environment
-        cache_key = (
-            f"rankings:v2:{environment}:{period}:{language or '-'}:{topic or '-'}:{min_stars}:"
-            f"{query or '-'}:{page}:{limit}"
-        )
-        cached = await response_cache.get(cache_key)
-        if cached:
-            return RankingResponse.model_validate(cached)
-
         run = await self._catalog.latest_ranking_run(period)
         if run is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"{period} 天榜单尚未生成",
             )
+
+        version = (run.collection_summary or {}).get("fingerprint", "legacy")
+        cache_key = (
+            f"rankings:v3:{run.id}:{run.published_at}:{version}:{environment}:{period}:"
+            f"{language or '-'}:{topic or '-'}:{min_stars}:{query or '-'}:{page}:{limit}"
+        )
+        cached = await response_cache.get(cache_key)
+        if cached:
+            return RankingResponse.model_validate(cached)
 
         rows = await self._catalog.ranking_rows(run.id)
         filtered = [
@@ -70,7 +72,9 @@ class CatalogService:
                 period_days=period,
                 as_of=run.as_of,
                 baseline_at=run.baseline_at,
-                generated_at=run.as_of,
+                generated_at=run.published_at or run.as_of,
+                collection=CollectionSummary.model_validate(run.collection_summary)
+                if run.collection_summary else None,
                 coverage=await self._catalog.coverage_count(),
                 total=len(filtered),
                 page=page,

@@ -184,7 +184,7 @@ class SnapshotCollector:
             row.availability_applied = True
 
     def _flush(self, session: Session, requests: RepositoryRequests) -> None:
-        job = session.scalar(select(JobRun).where(JobRun.job_key == self.job_key))
+        job = session.scalar(select(JobRun).where(JobRun.job_key == self.job_key).with_for_update())
         if job:
             progress = dict(job.progress or {})
             failures = self.failures
