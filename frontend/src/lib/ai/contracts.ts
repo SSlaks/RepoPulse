@@ -39,6 +39,14 @@ export const translationRecordSchema = z.object({
   imageBaseUrl: z.string().trim().min(1).max(2048),
 }).strict();
 export type TranslationRecord = z.infer<typeof translationRecordSchema>;
+export const summaryRecordSchema = z.object({
+  repository: z.string().trim().min(1).max(512),
+  summary: z.string().trim().min(1).max(1000),
+  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  generatedAt: z.string().datetime(),
+  modelName: z.string().trim().min(1).max(256),
+}).strict();
+export type SummaryRecord = z.infer<typeof summaryRecordSchema>;
 export const eventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("progress"), completed: z.number().nonnegative(), total: z.number().positive(), message: z.string(), indeterminate: z.boolean().optional() }),
   z.object({ type: z.literal("result"), result: resultSchema }),

@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { AI_STORAGE_KEY } from "../src/lib/ai/storage";
-import { README_TRANSLATION_DB_NAME, README_TRANSLATION_STORE } from "../src/lib/ai/readme-storage";
+import { README_SUMMARY_STORE, README_TRANSLATION_DB_NAME, README_TRANSLATION_DB_VERSION, README_TRANSLATION_STORE } from "../src/lib/ai/readme-storage";
 
 const saved = { selected: "deepseek", providers: { deepseek: { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-ui-fixture" } } };
 async function configure(page: Page) {
@@ -15,10 +15,13 @@ async function seedTranslationRecord(page: Page, record: {
   modelName: string;
   imageBaseUrl: string;
 }) {
-  await page.evaluate(async ({ databaseName, storeName, value }) => {
+  await page.evaluate(async ({ databaseName, version, storeName, summaryStoreName, value }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(databaseName, 1);
-      request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(storeName)) request.result.createObjectStore(storeName, { keyPath: "repository" }); };
+      const request = indexedDB.open(databaseName, version);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(storeName)) request.result.createObjectStore(storeName, { keyPath: "repository" });
+        if (!request.result.objectStoreNames.contains(summaryStoreName)) request.result.createObjectStore(summaryStoreName, { keyPath: "repository" });
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -29,7 +32,7 @@ async function seedTranslationRecord(page: Page, record: {
       transaction.onerror = () => reject(transaction.error);
     });
     database.close();
-  }, { databaseName: README_TRANSLATION_DB_NAME, storeName: README_TRANSLATION_STORE, value: record });
+  }, { databaseName: README_TRANSLATION_DB_NAME, version: README_TRANSLATION_DB_VERSION, storeName: README_TRANSLATION_STORE, summaryStoreName: README_SUMMARY_STORE, value: record });
 }
 
 test("settings save, switch, reload and delete with bundled provider avatars", async ({ page }, testInfo) => {
@@ -160,6 +163,29 @@ test("README translation records survive leaving and re-entering a repository", 
   expect(calls).toBe(1);
 });
 
+test("README summary records survive leaving and re-entering a repository", async ({ page }) => {
+  await configure(page);
+  let calls = 0;
+  await page.route("**/api/ai/readme", async (route) => {
+    calls++;
+    expect(route.request().postDataJSON().mode).toBe("summary");
+    const events = [
+      { type: "progress", completed: 0, total: 1, message: "正在连接模型", indeterminate: true },
+      { type: "result", result: { mode: "summary", summary: "这是持久化摘要。" } },
+    ];
+    await route.fulfill({ contentType: "application/x-ndjson", body: events.map((event) => JSON.stringify(event)).join("\n") + "\n" });
+  });
+  await page.goto("/repo/fastapi/fastapi");
+  await page.getByRole("button", { name: "总结翻译" }).click();
+  await expect(page.getByText("这是持久化摘要。", { exact: true })).toBeVisible();
+  await expect(page.getByText("已保存摘要", { exact: false })).toBeVisible();
+  await page.goto("/ranking?period=7");
+  await page.goto("/repo/fastapi/fastapi");
+  await expect(page.getByText("这是持久化摘要。", { exact: true })).toBeVisible();
+  await expect(page.getByText("已保存摘要", { exact: false })).toBeVisible();
+  expect(calls).toBe(1);
+});
+
 test("README keeps a generated translation in the page when IndexedDB save fails", async ({ page }) => {
   await configure(page);
   await page.addInitScript(() => {
@@ -184,10 +210,13 @@ test("README keeps a generated translation in the page when IndexedDB save fails
 
 test("README preserves an old record and warns when the source fingerprint changes", async ({ page }) => {
   await page.goto("/repo/fastapi/fastapi");
-  await page.evaluate(async ({ databaseName, storeName }) => {
+  await page.evaluate(async ({ databaseName, version, storeName, summaryStoreName }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(databaseName, 1);
-      request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(storeName)) request.result.createObjectStore(storeName, { keyPath: "repository" }); };
+      const request = indexedDB.open(databaseName, version);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(storeName)) request.result.createObjectStore(storeName, { keyPath: "repository" });
+        if (!request.result.objectStoreNames.contains(summaryStoreName)) request.result.createObjectStore(summaryStoreName, { keyPath: "repository" });
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -198,7 +227,7 @@ test("README preserves an old record and warns when the source fingerprint chang
       transaction.onerror = () => reject(transaction.error);
     });
     database.close();
-  }, { databaseName: README_TRANSLATION_DB_NAME, storeName: README_TRANSLATION_STORE });
+  }, { databaseName: README_TRANSLATION_DB_NAME, version: README_TRANSLATION_DB_VERSION, storeName: README_TRANSLATION_STORE, summaryStoreName: README_SUMMARY_STORE });
   await page.reload();
   await expect(page.getByRole("status")).toContainText("原文已更新，可重新翻译");
   await page.getByRole("button", { name: "中文译文" }).click();

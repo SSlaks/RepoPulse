@@ -6,8 +6,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { MarkdownContent } from "@/components/markdown-content";
 import { findProvider } from "@/lib/ai/catalog";
 import { requestReadme } from "@/lib/ai/client";
-import { MAX_README_CHARS, type AiCredentials, type AiEvent, type ReadmeMode, type TranslationRecord } from "@/lib/ai/contracts";
-import { fingerprintMarkdown, getReadmeTranslation, saveReadmeTranslation } from "@/lib/ai/readme-storage";
+import { MAX_README_CHARS, type AiCredentials, type AiEvent, type ReadmeMode, type SummaryRecord, type TranslationRecord } from "@/lib/ai/contracts";
+import { fingerprintMarkdown, getReadmeSummary, getReadmeTranslation, saveReadmeSummary, saveReadmeTranslation } from "@/lib/ai/readme-storage";
 import { activeCredentials } from "@/lib/ai/storage";
 
 const subscribeLocation = () => () => undefined;
@@ -25,11 +25,6 @@ interface ReadmeAiProps {
   repository: string;
 }
 
-interface SummaryState {
-  text: string;
-  modelName: string;
-}
-
 interface PendingGeneration {
   id: number;
   mode: ReadmeMode;
@@ -40,8 +35,10 @@ interface PendingGeneration {
 const initialProgress: ProgressEvent = { type: "progress", completed: 0, total: 1, message: "准备生成", indeterminate: true };
 
 export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) {
-  const [summary, setSummary] = useState<SummaryState | null>(null);
+  const [summary, setSummary] = useState<SummaryRecord | null>(null);
   const [translation, setTranslation] = useState<TranslationRecord | null>(null);
+  const [summaryPersistenceStatus, setSummaryPersistenceStatus] = useState<PersistenceStatus>(null);
+  const [summaryPersistenceError, setSummaryPersistenceError] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>(null);
   const [persistenceError, setPersistenceError] = useState("");
   const [sourceFingerprint, setSourceFingerprint] = useState<string | null>(null);
@@ -80,11 +77,14 @@ export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) 
     setModelLabel(credentials ? modelName(credentials) : "");
   }, []);
 
-  const loadStoredTranslation = useCallback(async (clearRecord: boolean) => {
+  const loadStoredRecords = useCallback(async (clearRecord: boolean) => {
     const requestId = ++loadId.current;
     setStorageStatus("loading");
     setStorageError("");
     if (clearRecord) {
+      setSummary(null);
+      setSummaryPersistenceStatus(null);
+      setSummaryPersistenceError("");
       setTranslation(null);
       setPersistenceStatus(null);
       setPersistenceError("");
@@ -94,15 +94,21 @@ export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) 
       const fingerprint = await fingerprintMarkdown(markdown);
       if (requestId !== loadId.current) return;
       setSourceFingerprint(fingerprint);
-      const record = await getReadmeTranslation(repository);
+      const [summaryRecord, translationRecord] = await Promise.all([
+        getReadmeSummary(repository),
+        getReadmeTranslation(repository),
+      ]);
       if (requestId !== loadId.current) return;
-      setTranslation(record);
-      setPersistenceStatus(record ? "saved" : null);
+      setSummary(summaryRecord);
+      setSummaryPersistenceStatus(summaryRecord ? "saved" : null);
+      setSummaryPersistenceError("");
+      setTranslation(translationRecord);
+      setPersistenceStatus(translationRecord ? "saved" : null);
       setPersistenceError("");
       setStorageStatus("ready");
     } catch (cause) {
       if (requestId !== loadId.current) return;
-      const message = cause instanceof Error ? cause.message : "无法读取翻译记录。";
+      const message = cause instanceof Error ? cause.message : "无法读取 AI 记录。";
       setStorageError(message);
       setStorageStatus("error");
     }
@@ -131,13 +137,13 @@ export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) 
       setSummary(null);
       setTranslated(false);
       setError("");
-      void loadStoredTranslation(true);
+      void loadStoredRecords(true);
     });
     return () => {
       active = false;
       invalidatePendingWork();
     };
-  }, [invalidatePendingWork, loadStoredTranslation]);
+  }, [invalidatePendingWork, loadStoredRecords]);
 
   const isActive = (operation: PendingGeneration): boolean => (
     pending.current?.id === operation.id && generationId.current === operation.id && !operation.controller.signal.aborted
@@ -182,7 +188,8 @@ export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) 
       });
       if (!isActive(operation)) return;
       if (mode === "summary" && generated.mode === "summary") {
-        setSummary({ text: generated.summary, modelName: currentModelName });
+        const fingerprint = sourceFingerprint ?? await fingerprintMarkdown(markdown);
+        if (isActive(operation)) await finishSummary(operation, generated.summary, currentModelName, fingerprint);
         return;
       }
       if (mode === "translation" && generated.mode === "translation" && sourceFingerprint) {
@@ -195,6 +202,31 @@ export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) 
       if (isActive(operation)) {
         pending.current = null;
         setBusy(null);
+      }
+    }
+  }
+
+  async function finishSummary(operation: PendingGeneration, summaryText: string, currentModelName: string, fingerprint: string): Promise<void> {
+    const record: SummaryRecord = {
+      repository,
+      summary: summaryText,
+      sourceFingerprint: fingerprint,
+      generatedAt: new Date().toISOString(),
+      modelName: currentModelName,
+    };
+    setProgress((current) => ({ ...current, message: "正在保存摘要记录" }));
+    try {
+      await saveReadmeSummary(record, operation.controller.signal);
+      if (isActive(operation)) {
+        setSummary(record);
+        setSummaryPersistenceStatus("saved");
+        setSummaryPersistenceError("");
+      }
+    } catch (cause) {
+      if (isActive(operation)) {
+        setSummary(record);
+        setSummaryPersistenceStatus("unsaved");
+        setSummaryPersistenceError(`摘要已生成，但摘要记录保存失败：${cause instanceof Error ? cause.message : "请检查浏览器存储权限。"}`);
       }
     }
   }
@@ -244,6 +276,7 @@ export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) 
   }
 
   const staleTranslation = Boolean(translation && sourceFingerprint && translation.sourceFingerprint !== sourceFingerprint);
+  const staleSummary = Boolean(summary && sourceFingerprint && summary.sourceFingerprint !== sourceFingerprint);
   const content = translated && translation ? translation.translation : markdown;
   const contentImageBaseUrl = translated && translation ? translation.imageBaseUrl : imageBaseUrl;
   const summaryModel = summary?.modelName || modelLabel || "当前模型";
@@ -263,14 +296,17 @@ export function ReadmeAi({ markdown, imageBaseUrl, repository }: ReadmeAiProps) 
         <Link className="ai-icon-button" href={settingsHref} aria-label="模型设置" title="模型设置"><Settings size={17} /></Link>
       </div>
       {missing ? <p className="ai-readme-notice" role="status">请先配置模型，再发起 AI 操作。<Link href={settingsHref}>前往设置</Link></p> : null}
-      {storageStatus === "error" && !translation ? <div className="ai-readme-notice ai-readme-storage-error" role="alert"><span>翻译记录读取失败：{storageError || "请稍后重试。"}</span><div><button className="ai-button" disabled={Boolean(busy)} onClick={() => void loadStoredTranslation(false)}>重试读取记录</button><button className="ai-button" disabled={Boolean(busy)} onClick={() => void generate("translation", true)}>继续翻译（仅本页）</button></div></div> : null}
+      {storageStatus === "error" && !translation ? <div className="ai-readme-notice ai-readme-storage-error" role="alert"><span>翻译记录读取失败：{storageError || "请稍后重试。"}</span><div><button className="ai-button" disabled={Boolean(busy)} onClick={() => void loadStoredRecords(false)}>重试读取记录</button><button className="ai-button" disabled={Boolean(busy)} onClick={() => void generate("translation", true)}>继续翻译（仅本页）</button></div></div> : null}
+      {staleSummary ? <p className="ai-readme-notice" role="status">原文已更新，可重新总结。当前显示的摘要来自 {formatGeneratedAt(summary?.generatedAt)}。</p> : null}
+      {summary && !staleSummary && summaryPersistenceStatus === "saved" ? <p className="ai-readme-record" role="status"><CalendarClock size={14} />已保存摘要 · {summary.modelName} · {formatGeneratedAt(summary.generatedAt)}</p> : null}
+      {summary && summaryPersistenceStatus === "unsaved" ? <p className="ai-readme-notice ai-readme-storage-warning" role="alert">{summaryPersistenceError || "当前摘要仅保留在本页，尚未保存。"}</p> : null}
       {staleTranslation ? <p className="ai-readme-notice" role="status">原文已更新，可重新翻译。当前显示的译文来自 {formatGeneratedAt(translation?.generatedAt)}。</p> : null}
       {translation && !staleTranslation && persistenceStatus === "saved" ? <p className="ai-readme-record" role="status"><CalendarClock size={14} />已保存译文 · {translation.modelName} · {formatGeneratedAt(translation.generatedAt)}</p> : null}
       {translation && persistenceStatus === "unsaved" ? <p className="ai-readme-notice ai-readme-storage-warning" role="alert">{persistenceError || "当前译文仅保留在本页，尚未保存。"}</p> : null}
       {busy ? <ProgressCard mode={busy} progress={progress} onCancel={cancelGeneration} /> : null}
       {error ? <p className="ai-error ai-readme-notice" role="alert">{error}</p> : null}
       <article className="readme-content">
-        {summary ? <section className="ai-summary" aria-label="AI 摘要"><div className="ai-summary-title"><strong><Sparkles size={17} />AI 项目摘要</strong><small>{summaryModel} · AI 生成，请结合原文核对</small></div><MarkdownContent content={summary.text} imageBaseUrl={imageBaseUrl} /></section> : null}
+        {summary ? <section className="ai-summary" aria-label="AI 摘要"><div className="ai-summary-title"><strong><Sparkles size={17} />AI 项目摘要</strong><small>{summaryModel} · AI 生成，请结合原文核对</small></div><MarkdownContent content={summary.summary} imageBaseUrl={imageBaseUrl} /></section> : null}
         <MarkdownContent content={content} imageBaseUrl={contentImageBaseUrl} />
       </article>
     </>

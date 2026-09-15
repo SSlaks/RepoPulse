@@ -1,8 +1,9 @@
-import { translationRecordSchema, type TranslationRecord } from "./contracts";
+import { summaryRecordSchema, translationRecordSchema, type SummaryRecord, type TranslationRecord } from "./contracts";
 
 export const README_TRANSLATION_DB_NAME = "repopulse-readme-ai";
 export const README_TRANSLATION_STORE = "translations";
-export const README_TRANSLATION_DB_VERSION = 1;
+export const README_SUMMARY_STORE = "summaries";
+export const README_TRANSLATION_DB_VERSION = 2;
 
 function openDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") {
@@ -16,6 +17,9 @@ function openDatabase(): Promise<IDBDatabase> {
       const database = request.result;
       if (!database.objectStoreNames.contains(README_TRANSLATION_STORE)) {
         database.createObjectStore(README_TRANSLATION_STORE, { keyPath: "repository" });
+      }
+      if (!database.objectStoreNames.contains(README_SUMMARY_STORE)) {
+        database.createObjectStore(README_SUMMARY_STORE, { keyPath: "repository" });
       }
     };
     request.onsuccess = () => {
@@ -34,10 +38,10 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
-function closeAfter<T>(database: IDBDatabase, task: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+function closeAfter<T>(database: IDBDatabase, storeName: string, task: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(README_TRANSLATION_STORE, "readonly");
-    const request = task(transaction.objectStore(README_TRANSLATION_STORE));
+    const transaction = database.transaction(storeName, "readonly");
+    const request = task(transaction.objectStore(storeName));
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("无法读取翻译记录。"));
     transaction.onerror = () => reject(transaction.error ?? new Error("无法读取翻译记录。"));
@@ -49,7 +53,7 @@ function closeAfter<T>(database: IDBDatabase, task: (store: IDBObjectStore) => I
 export async function getReadmeTranslation(repository: string): Promise<TranslationRecord | null> {
   const database = await openDatabase();
   try {
-    const value = await closeAfter(database, (store) => store.get(repository));
+    const value = await closeAfter(database, README_TRANSLATION_STORE, (store) => store.get(repository));
     if (value === undefined) return null;
     const parsed = translationRecordSchema.safeParse(value);
     if (!parsed.success) throw new Error("已保存的翻译记录格式无效，请重新翻译。");
@@ -60,16 +64,32 @@ export async function getReadmeTranslation(repository: string): Promise<Translat
   }
 }
 
-export async function saveReadmeTranslation(record: TranslationRecord, signal?: AbortSignal): Promise<void> {
-  const parsed = translationRecordSchema.safeParse(record);
-  if (!parsed.success) throw new Error("翻译记录格式无效，无法保存。");
+export async function getReadmeSummary(repository: string): Promise<SummaryRecord | null> {
+  const database = await openDatabase();
+  try {
+    const value = await closeAfter(database, README_SUMMARY_STORE, (store) => store.get(repository));
+    if (value === undefined) return null;
+    const parsed = summaryRecordSchema.safeParse(value);
+    if (!parsed.success) throw new Error("已保存的摘要记录格式无效，请重新总结。");
+    return parsed.data;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
+
+type RecordSchema<T> = { safeParse: (value: unknown) => { success: true; data: T } | { success: false } };
+
+async function saveRecord<T>(record: unknown, schema: RecordSchema<T>, storeName: string, label: string, signal?: AbortSignal): Promise<void> {
+  const parsed = schema.safeParse(record);
+  if (!parsed.success) throw new Error(`${label}记录格式无效，无法保存。`);
   signal?.throwIfAborted();
   const database = await openDatabase();
   try {
     signal?.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(README_TRANSLATION_STORE, "readwrite");
-      const request = transaction.objectStore(README_TRANSLATION_STORE).put(parsed.data);
+      const transaction = database.transaction(storeName, "readwrite");
+      const request = transaction.objectStore(storeName).put(parsed.data);
       let settled = false;
       const finish = (callback: () => void) => {
         if (settled) return;
@@ -79,21 +99,29 @@ export async function saveReadmeTranslation(record: TranslationRecord, signal?: 
       };
       const abortError = () => signal?.reason instanceof Error
         ? signal.reason
-        : new DOMException("翻译记录保存已取消。", "AbortError");
+        : new DOMException(`${label}记录保存已取消。`, "AbortError");
       const abortTransaction = () => {
         try { transaction.abort(); }
         catch { finish(() => reject(abortError())); }
       };
-      request.onerror = () => finish(() => reject(request.error ?? new Error("无法保存翻译记录。")));
+      request.onerror = () => finish(() => reject(request.error ?? new Error(`无法保存${label}记录。`)));
       transaction.oncomplete = () => finish(resolve);
-      transaction.onerror = () => finish(() => reject(transaction.error ?? new Error("无法保存翻译记录。")));
-      transaction.onabort = () => finish(() => reject(signal?.aborted ? abortError() : transaction.error ?? new Error("无法保存翻译记录。")));
+      transaction.onerror = () => finish(() => reject(transaction.error ?? new Error(`无法保存${label}记录。`)));
+      transaction.onabort = () => finish(() => reject(signal?.aborted ? abortError() : transaction.error ?? new Error(`无法保存${label}记录。`)));
       if (signal?.aborted) abortTransaction();
       else signal?.addEventListener("abort", abortTransaction, { once: true });
     });
   } finally {
     database.close();
   }
+}
+
+export function saveReadmeTranslation(record: TranslationRecord, signal?: AbortSignal): Promise<void> {
+  return saveRecord(record, translationRecordSchema, README_TRANSLATION_STORE, "翻译", signal);
+}
+
+export function saveReadmeSummary(record: SummaryRecord, signal?: AbortSignal): Promise<void> {
+  return saveRecord(record, summaryRecordSchema, README_SUMMARY_STORE, "摘要", signal);
 }
 
 export async function fingerprintMarkdown(markdown: string): Promise<string> {
