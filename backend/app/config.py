@@ -1,6 +1,7 @@
 from functools import lru_cache
+from urllib.parse import urlsplit
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +42,45 @@ class Settings(BaseSettings):
     avatar_warmup_limit: int = 100
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def validate_production_safety(self) -> "Settings":
+        if self.environment.strip().lower() != "production":
+            return self
+
+        errors: list[str] = []
+        if self.seed_demo_data:
+            errors.append("SEED_DEMO_DATA must be false")
+
+        for variable, value in (
+            ("DATABASE_URL", self.database_url),
+            ("SYNC_DATABASE_URL", self.sync_database_url),
+        ):
+            scheme, separator, remainder = value.partition("://")
+            parsed = urlsplit(f"postgresql://{remainder}") if separator else urlsplit("")
+            if not scheme.startswith("postgresql"):
+                errors.append(f"{variable} must use PostgreSQL")
+            elif not parsed.hostname or not parsed.username or not parsed.password:
+                errors.append(f"{variable} must include a host, username, and password")
+
+        redis = urlsplit(self.redis_url)
+        if redis.scheme not in {"redis", "rediss"} or not redis.hostname or not redis.password:
+            errors.append("REDIS_URL must include a Redis host and password")
+
+        if not self.cors_origins:
+            errors.append("FRONTEND_ORIGINS must contain at least one HTTPS origin")
+        for origin in self.cors_origins:
+            parsed = urlsplit(origin)
+            if parsed.scheme != "https" or not parsed.hostname:
+                errors.append("FRONTEND_ORIGINS must contain only HTTPS origins")
+                break
+            if parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"}:
+                errors.append("FRONTEND_ORIGINS must not contain localhost in production")
+                break
+
+        if errors:
+            raise ValueError("Unsafe production configuration: " + "; ".join(errors))
+        return self
 
     @property
     def cors_origins(self) -> list[str]:

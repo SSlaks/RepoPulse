@@ -85,7 +85,6 @@ function AvatarImage({
 }
 
 function buildAvatarSource(ownerGithubId: number, retryAttempt: number): string {
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-  const source = `${baseUrl}/api/v1/avatars/${ownerGithubId}`;
+  const source = `/api/v1/avatars/${ownerGithubId}`;
   return retryAttempt ? `${source}?retry=${retryAttempt}` : source;
 }

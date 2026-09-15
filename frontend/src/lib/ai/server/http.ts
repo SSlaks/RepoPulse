@@ -6,9 +6,32 @@ import { summarizeReadme, translateReadme } from "./translate";
 
 const HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 
+function isAllowedOrigin(request: Request, origin: string): boolean {
+  const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (configuredSiteUrl) {
+    try {
+      if (new URL(configuredSiteUrl).origin === origin) return true;
+    } catch {
+      return false;
+    }
+  }
+  if (new URL(request.url).origin === origin) return true;
+  // Next may expose its 0.0.0.0 bind address while a local browser uses localhost or 127.0.0.1.
+  return request.headers.get("sec-fetch-site") === "same-origin" && isLoopbackOrigin(origin);
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 async function readBody(request: Request): Promise<unknown> {
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) throw new AiError("ORIGIN", "不允许跨站调用。", 403);
+  if (origin && !isAllowedOrigin(request, origin)) throw new AiError("ORIGIN", "不允许跨站调用。", 403);
   if (!request.headers.get("content-type")?.startsWith("application/json")) throw new AiError("INVALID_REQUEST", "请求格式无效。", 400);
   const reader = request.body?.getReader();
   if (!reader) throw new AiError("INVALID_REQUEST", "请求内容为空。", 400);

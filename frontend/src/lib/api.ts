@@ -9,8 +9,7 @@ import type {
 } from "@/lib/types";
 
 const SERVER_API_BASE = process.env.API_BASE_URL ?? "http://localhost:8000";
-export const PUBLIC_API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+export const PUBLIC_API_BASE = "";
 
 function rankingParams(filters: RankingFilters): URLSearchParams {
   const params = new URLSearchParams({

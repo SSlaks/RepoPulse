@@ -64,12 +64,70 @@ test("vendor errors and malformed output never echo credentials", async () => {
   expect(() => parseCompletion("openai", { choices: [{ finish_reason: "stop", message: { content: "" } }] })).toThrow();
 });
 
+test("AI request handling never logs credentials or raw vendor errors", async () => {
+  const captured: string[] = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const capture = (...values: unknown[]) => captured.push(values.map(String).join(" "));
+  console.log = capture;
+  console.warn = capture;
+  console.error = capture;
+  globalThis.fetch = async () => Response.json(
+    { error: { message: `vendor detail contains ${credentials.apiKey}` } },
+    { status: 500 },
+  );
+
+  try {
+    const response = await testConnection(request(credentials));
+    expect(response.status).toBe(502);
+    expect(await response.text()).not.toContain(credentials.apiKey);
+    expect(captured.join("\n")).not.toContain(credentials.apiKey);
+    expect(captured.join("\n")).not.toContain("vendor detail");
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+});
+
 test("request validation rejects cross-origin and malformed bodies without vendor calls", async () => {
   globalThis.fetch = async () => { throw new Error("must not call vendor"); };
   expect((await testConnection(request({ ...credentials, endpoint: "https://evil.test" }))).status).toBe(400);
   const cross = request(credentials); cross.headers.set("origin", "https://evil.test");
   expect((await testConnection(cross)).status).toBe(403);
   expect((await generateReadme(request({ ...credentials, markdown: "a".repeat(100001) }))).status).toBe(400);
+});
+
+test("configured public site origin is accepted behind a container bind address", async () => {
+  const previousSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  process.env.NEXT_PUBLIC_SITE_URL = "https://repopulse.example.com";
+  globalThis.fetch = async () => completion("OK");
+  const sameSite = request(credentials);
+  sameSite.headers.set("origin", "https://repopulse.example.com");
+
+  try {
+    expect((await testConnection(sameSite)).status).toBe(200);
+  } finally {
+    if (previousSiteUrl === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+    else process.env.NEXT_PUBLIC_SITE_URL = previousSiteUrl;
+  }
+});
+
+test("local loopback aliases remain usable for browser same-origin requests", async () => {
+  const previousSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  process.env.NEXT_PUBLIC_SITE_URL = "http://localhost:3000";
+  globalThis.fetch = async () => completion("OK");
+  const loopback = request(credentials);
+  loopback.headers.set("origin", "http://127.0.0.1:3000");
+  loopback.headers.set("sec-fetch-site", "same-origin");
+
+  try {
+    expect((await testConnection(loopback)).status).toBe(200);
+  } finally {
+    if (previousSiteUrl === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+    else process.env.NEXT_PUBLIC_SITE_URL = previousSiteUrl;
+  }
 });
 
 test("Markdown grouping preserves exact code, links and source order", () => {

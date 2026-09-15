@@ -58,6 +58,7 @@ test("settings save, switch, reload and delete with bundled provider avatars", a
   await page.screenshot({ path: testInfo.outputPath("settings-dark.png"), fullPage: true, animations: "disabled" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("button", { name: "删除当前厂商配置" }).click();
+  expect(await page.evaluate((key) => localStorage.getItem(key), AI_STORAGE_KEY)).toBeNull();
   await page.reload();
   await expect(page.getByLabel("API Key", { exact: true })).toHaveValue("");
 });

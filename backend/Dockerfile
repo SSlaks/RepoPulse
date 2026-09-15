@@ -7,4 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY backend ./backend
 COPY worker ./worker
-RUN pip install --no-cache-dir ./backend
+RUN pip install --no-cache-dir ./backend \
+    && groupadd --system --gid 10001 repopulse \
+    && useradd --system --uid 10001 --gid repopulse --home-dir /nonexistent --shell /usr/sbin/nologin repopulse \
+    && mkdir -p /var/cache/repopulse/avatars \
+    && chown -R repopulse:repopulse /var/cache/repopulse
+
+USER 10001:10001

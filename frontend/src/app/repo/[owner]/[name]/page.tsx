@@ -10,6 +10,7 @@ import {
   Star,
 } from "lucide-react";
 import Link from "next/link";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
@@ -18,6 +19,7 @@ import { RepositoryReadme, RepositoryReadmeFallback } from "@/components/reposit
 import { StarChart } from "@/components/star-chart";
 import { fetchRepository, fetchSnapshots } from "@/lib/api";
 import { formatDate, formatNumber } from "@/lib/format";
+import { serializeJsonLd } from "@/lib/json-ld";
 import { getRepositoryDescription } from "@/lib/repository-copy";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +50,7 @@ export async function generateMetadata({ params }: RepositoryPageProps): Promise
 
 export default async function RepositoryPage({ params, searchParams }: RepositoryPageProps) {
   const { owner, name } = await params;
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   const query = await searchParams;
   const returnTo = safeReturnTo(firstValue(query.returnTo));
   const [repositoryResult, snapshotResult] = await Promise.allSettled([
@@ -126,7 +129,11 @@ export default async function RepositoryPage({ params, searchParams }: Repositor
           </dl>
         </div>
       </section>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }} />
+      <script
+        nonce={nonce}
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(schema) }}
+      />
     </main>
   );
 }

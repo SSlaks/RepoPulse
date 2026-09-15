@@ -114,6 +114,6 @@ function AiSettingsForm({ returnTo }: { returnTo: string | null }) {
         {error ? <p className="ai-error" role="alert">{error}</p> : null}
       </section>
     </div>
-    <p className="ai-privacy"><ShieldCheck size={18} /><span>密钥保存在当前浏览器；调用时经 RepoPulse 服务端临时转发，不写入服务端数据库或日志。请仅在可信设备上保存。</span></p>
+    <p className="ai-privacy"><ShieldCheck size={18} /><span>Key 会长期保存在当前浏览器的 localStorage 中，且该站点加载的页面脚本能够读取。调用时仅由 RepoPulse 服务端临时转发，不写入服务端数据库或日志；请勿在公共或不受信任的设备上保存。</span></p>
   </main>;
 }

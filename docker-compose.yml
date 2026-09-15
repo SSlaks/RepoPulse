@@ -1,59 +1,83 @@
+x-container-hardening: &container-hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  pids_limit: 256
+  mem_limit: 768m
+  cpus: 2.0
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+
 x-backend-service: &backend-service
   image: repopulse-backend:local
   build:
     context: .
     dockerfile: backend/Dockerfile
+  <<: *container-hardening
+  networks:
+    - backend
+    - egress
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: repopulse
-      POSTGRES_USER: repopulse
-      POSTGRES_PASSWORD: repopulse
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - repopulse-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U repopulse"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - backend
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    command: ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - backend
 
   api:
     <<: *backend-service
     command: ["sh", "-c", "cd /app/backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     environment: &backend-env
       ENVIRONMENT: production
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
-      DATABASE_URL: postgresql+psycopg_async://repopulse:repopulse@postgres:5432/repopulse
-      SYNC_DATABASE_URL: postgresql+psycopg://repopulse:repopulse@postgres:5432/repopulse
-      REDIS_URL: redis://redis:6379/0
-      FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      SEED_DEMO_DATA: "false"
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL:?Set SYNC_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:?Set FRONTEND_ORIGINS}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      CANDIDATE_LANGUAGES: ${CANDIDATE_LANGUAGES:-TypeScript,JavaScript,Python,Go,Rust,Java,C++,C#,Swift,Kotlin,PHP,Ruby,Dart,Shell}
+      CANDIDATE_TOPICS: ${CANDIDATE_TOPICS:-ai,llm,developer-tools,database,web-framework,self-hosted}
+      MANUAL_SEED_REPOSITORIES: ${MANUAL_SEED_REPOSITORIES:-}
       EXCLUDED_REPOSITORIES: ${EXCLUDED_REPOSITORIES:-}
       REPOSITORY_AUTO_QUARANTINE: ${REPOSITORY_AUTO_QUARANTINE:-false}
       REPOSITORY_PROBE_ENABLED: ${REPOSITORY_PROBE_ENABLED:-true}
       SNAPSHOT_DEADLINE_HOURS: ${SNAPSHOT_DEADLINE_HOURS:-6}
       RANKING_MIN_COMPLETENESS_PERCENT: ${RANKING_MIN_COMPLETENESS_PERCENT:-95}
+      MAX_ACTIVE_REPOSITORIES: ${MAX_ACTIVE_REPOSITORIES:-5000}
+      GITHUB_SEARCH_PAGES: ${GITHUB_SEARCH_PAGES:-2}
       SNAPSHOT_CONCURRENCY: ${SNAPSHOT_CONCURRENCY:-4}
       SNAPSHOT_REQUESTS_PER_SECOND: ${SNAPSHOT_REQUESTS_PER_SECOND:-4}
       SNAPSHOT_BATCH_SIZE: ${SNAPSHOT_BATCH_SIZE:-50}
       SNAPSHOT_FLUSH_SECONDS: ${SNAPSHOT_FLUSH_SECONDS:-5}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.05}
       AVATAR_CACHE_DIR: /var/cache/repopulse/avatars
-    ports:
-      - "8000:8000"
     volumes:
       - repopulse-avatar-cache:/var/cache/repopulse/avatars:ro
     depends_on:
@@ -62,21 +86,39 @@ services:
       redis:
         condition: service_healthy
 
+  avatar-cache-init:
+    image: repopulse-backend:local
+    command: ["sh", "-c", "chown -R 10001:10001 /var/cache/repopulse/avatars"]
+    user: "0:0"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+    read_only: true
+    network_mode: none
+    volumes:
+      - repopulse-avatar-cache:/var/cache/repopulse/avatars
+
   worker:
     <<: *backend-service
     command: ["celery", "-A", "worker.app.celery_app.celery_app", "worker", "--loglevel=INFO"]
     environment: *backend-env
+    volumes:
+      - repopulse-avatar-cache:/var/cache/repopulse/avatars
     depends_on:
       api:
         condition: service_started
       redis:
         condition: service_healthy
-    volumes:
-      - repopulse-avatar-cache:/var/cache/repopulse/avatars
+      avatar-cache-init:
+        condition: service_completed_successfully
 
   beat:
     <<: *backend-service
-    command: ["celery", "-A", "worker.app.celery_app.celery_app", "beat", "--loglevel=INFO"]
+    command: ["celery", "-A", "worker.app.celery_app.celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
     environment: *backend-env
     depends_on:
       worker:
@@ -86,12 +128,20 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        API_BASE_URL: http://api:8000
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL}
     environment:
       API_BASE_URL: http://api:8000
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL}
+    <<: *container-hardening
+    networks:
+      - edge
+      - backend
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/.next/cache:rw,noexec,nosuid,size=128m
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       api:
         condition: service_started
@@ -99,3 +149,9 @@ services:
 volumes:
   repopulse-postgres:
   repopulse-avatar-cache:
+
+networks:
+  edge:
+  backend:
+    internal: true
+  egress:

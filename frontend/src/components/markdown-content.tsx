@@ -9,7 +9,10 @@ interface MarkdownContentProps {
 
 export function MarkdownContent({ content, imageBaseUrl }: MarkdownContentProps) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={{
-    a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+    a: ({ children, href }) => {
+      const resolvedHref = resolveMarkdownLinkUrl(typeof href === "string" ? href : undefined, imageBaseUrl);
+      return resolvedHref ? <a href={resolvedHref} target="_blank" rel="noreferrer">{children}</a> : null;
+    },
     img: ({ src, alt, ...props }) => {
       const resolvedSrc = resolveMarkdownImageUrl(typeof src === "string" ? src : undefined, imageBaseUrl);
       return resolvedSrc ? (
@@ -25,6 +28,17 @@ export function MarkdownContent({ content, imageBaseUrl }: MarkdownContentProps)
       ) : null;
     },
   }}>{content}</ReactMarkdown>;
+}
+
+export function resolveMarkdownLinkUrl(href: string | undefined, baseUrl?: string): string | undefined {
+  if (!href) return undefined;
+  if (href.startsWith("#")) return href;
+  try {
+    const url = new URL(href, baseUrl);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function resolveMarkdownImageUrl(src: string | undefined, baseUrl?: string): string | undefined {

@@ -1,15 +1,41 @@
 services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
   api:
+    environment:
+      ENVIRONMENT: development
+      SEED_DEMO_DATA: "true"
+      FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     command: ["sh", "-c", "cd /app/backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app/backend
 
   worker:
+    environment:
+      ENVIRONMENT: development
+      SEED_DEMO_DATA: "true"
+      FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     volumes:
       - ./backend:/app/backend
       - ./worker:/app/worker
 
   beat:
+    environment:
+      ENVIRONMENT: development
+      SEED_DEMO_DATA: "true"
+      FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     volumes:
       - ./backend:/app/backend
       - ./worker:/app/worker
+
+  frontend:
+    ports:
+      - "127.0.0.1:3000:3000"

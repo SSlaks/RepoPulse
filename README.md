@@ -23,7 +23,7 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8000
 ```
 
-开发环境默认使用 SQLite，并自动初始化带有一年快照的演示数据。生产环境设置 `ENVIRONMENT=production` 后不会写入演示数据。
+不加载根目录 `.env.example` 时，开发环境默认使用 SQLite，并自动初始化带有一年快照的演示数据。该模板专用于 Docker Compose；生产配置使用单独的 `.env.production`。
 
 ### Next.js
 
@@ -36,15 +36,40 @@ npm run dev
 网站地址：<http://localhost:3000>  
 API 文档：<http://localhost:8000/docs>
 
-Compose 默认将 `SEED_DEMO_DATA` 设为 `true`，首次本地启动会在 PostgreSQL 中写入演示榜单和一年快照，便于直接体验页面。连接真实 GitHub 采集前，将其设为 `false` 并配置 `GITHUB_TOKEN`。
+### Docker Compose
 
-### PostgreSQL 与 Redis
+开发 Compose 使用 `.env.example` 中的 PostgreSQL/Redis 认证串，且 `docker-compose.override.yml` 才会打开本机开发端口并启用演示数据：
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
+```
+
+生产部署必须复制并填写 `.env.production.example`，不要加载开发 override；生产主配置会固定关闭演示数据，并拒绝 SQLite、空密码和 localhost Origin：
+
+```powershell
+Copy-Item .env.production.example .env.production
+# 编辑 .env.production，使用随机密码并对连接串中的密码进行 URL 编码
+docker compose --env-file .env.production -f docker-compose.yml up -d --build
+```
+
+PostgreSQL、Redis 和 FastAPI 只加入内部网络，不绑定宿主机公网端口。前端通过同源 `/api/v1/*` 访问，由 Next.js 在容器网络内转发到 `http://api:8000`；生产 HTTPS 应由 Caddy、Nginx 或云负载均衡终止，前端入口仅绑定宿主机回环地址。
+
+Redis 必须使用带密码的 `REDIS_URL`；可用下面的命令确认未认证连接被拒绝（应返回 `NOAUTH`）：
+
+```powershell
+docker compose --env-file .env.production -f docker-compose.yml exec redis redis-cli ping
+```
+
+Backend 和 Frontend 容器使用非 root 用户、只读根文件系统、`no-new-privileges`、`cap_drop: ALL` 和资源限制。生产响应头包含请求级 CSP nonce、HSTS、`X-Content-Type-Options`、`Referrer-Policy` 和 `Permissions-Policy`。
+
+### PostgreSQL 与 Redis（单独运行）
 
 ```powershell
 docker compose up -d postgres redis
 ```
 
-然后根据 [.env.example](./.env.example) 设置数据库、Redis 和 GitHub Token。多个 Token 可以用逗号分隔。采集服务需要 Redis：
+然后根据环境实际设置数据库、Redis 和 GitHub Token。多个 Token 可以用逗号分隔。采集服务需要 Redis：
 
 ```powershell
 $env:PYTHONPATH="backend;."
@@ -120,12 +145,6 @@ docker compose exec -w /app/backend api alembic upgrade head
 docker compose restart worker beat
 ```
 
-部署时不加载开发覆盖配置：
-
-```powershell
-docker compose -f docker-compose.yml up -d --build
-```
-
 ## 排名口径
 
 ```text
@@ -165,4 +184,6 @@ npm test -- --project=chromium
 
 ## 环境变量与提交安全
 
-复制 `.env.example` 为 `.env` 后再填写本地配置。`.env` 可能包含 GitHub Token、数据库连接和其他敏感值，已被 `.gitignore` 忽略，禁止提交；提交时只保留 `.env.example`。数据库、缓存、测试截图和构建产物同样不会进入版本库。
+复制 `.env.example` 为 `.env` 仅用于 Docker 开发，生产则复制 `.env.production.example` 为 `.env.production` 并填写随机密码。`.env` 和 `.env.production` 可能包含 GitHub Token、数据库连接和其他敏感值，已被 `.gitignore` 忽略，禁止提交；提交时只保留两个模板。数据库、缓存、测试截图和构建产物同样不会进入版本库。
+
+AI Key 仍按 `repopulse-ai-v1` 格式长期保存在当前浏览器的 `localStorage`，删除配置会完整移除该键。Key 不会写入服务端数据库或日志，但同源页面脚本能够读取它；因此公共设备不应保存 Key，且一旦同源脚本被 XSS 攻破，长期 Key 仍需要轮换。

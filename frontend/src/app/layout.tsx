@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Noto_Sans_SC } from "next/font/google";
+import { headers } from "next/headers";
 import Script from "next/script";
 
 import { SiteFooter } from "@/components/site-footer";
@@ -43,14 +44,18 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     <html lang="zh-CN" data-scroll-behavior="smooth" suppressHydrationWarning>
       <body className={`${inter.variable} ${notoSansSC.variable}`}>
         <SiteHeader />
         {children}
         <SiteFooter />
-        <Script id="theme-initializer" strategy="beforeInteractive">{THEME_INITIALIZER}</Script>
+        <Script id="theme-initializer" nonce={nonce} strategy="beforeInteractive">
+          {THEME_INITIALIZER}
+        </Script>
       </body>
     </html>
   );
