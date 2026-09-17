@@ -15,6 +15,10 @@ COPY . .
 RUN npm run build
 
 FROM node:22-alpine AS runtime
+ARG VCS_REF=local
+
+LABEL org.opencontainers.image.revision=$VCS_REF
+
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

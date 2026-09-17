@@ -1,7 +1,9 @@
-from fastapi.testclient import TestClient
-
+import pytest
 from app.clients.github import GitHubReadmeData
 from app.main import app
+from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.usefixtures("seeded_api_database")
 
 
 def test_health_and_ranking_endpoints() -> None:
@@ -48,6 +50,11 @@ def test_validation_error_uses_public_error_shape() -> None:
 
 
 def test_readme_endpoint_returns_decoded_github_content(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("app.services.catalog.limiter.acquire", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.services.catalog.limiter.release", AsyncMock(return_value=True))
+
     class StubCache:
         async def get(self, key: str) -> None:
             return None

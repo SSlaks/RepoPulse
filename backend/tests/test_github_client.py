@@ -2,7 +2,6 @@ import base64
 
 import httpx
 import pytest
-
 from app.clients.github import GitHubClient, GitHubClientError, GitHubRateLimitError
 
 

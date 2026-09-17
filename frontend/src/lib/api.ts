@@ -24,8 +24,15 @@ function rankingParams(filters: RankingFilters): URLSearchParams {
   return params;
 }
 
-async function getJson<T>(url: string, revalidate: number | null = 300): Promise<T> {
-  const response = await fetch(url, revalidate === null ? { cache: "no-store" } : { next: { revalidate } });
+async function getJson<T>(
+  url: string,
+  revalidate: number | null = 300,
+  headers?: HeadersInit,
+): Promise<T> {
+  const response = await fetch(
+    url,
+    revalidate === null ? { cache: "no-store", headers } : { next: { revalidate }, headers },
+  );
   if (!response.ok) {
     let message = "数据服务暂时不可用";
     try {
@@ -56,8 +63,12 @@ export async function fetchRepository(owner: string, name: string): Promise<Repo
   return getJson<Repository>(`${SERVER_API_BASE}/api/v1/repos/${owner}/${name}`);
 }
 
-export async function fetchReadme(owner: string, name: string): Promise<ReadmeResponse> {
-  return getJson<ReadmeResponse>(`${SERVER_API_BASE}/api/v1/repos/${owner}/${name}/readme`, 3600);
+export async function fetchReadme(
+  owner: string,
+  name: string,
+  headers?: HeadersInit,
+): Promise<ReadmeResponse> {
+  return getJson<ReadmeResponse>(`${SERVER_API_BASE}/api/v1/repos/${owner}/${name}/readme`, 3600, headers);
 }
 
 export async function fetchSnapshots(

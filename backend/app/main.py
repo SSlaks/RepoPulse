@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import rankings, repositories, system
 from app.config import get_settings
 from app.database import async_engine, async_session_factory
+from app.internal.limiter import limiter
 from app.models import Base
 from app.seed import seed_demo_data
 
@@ -37,6 +38,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         async with async_session_factory() as session:
             await seed_demo_data(session)
     yield
+    await limiter.close()
     await async_engine.dispose()
 
 
@@ -68,6 +70,7 @@ async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": f"HTTP_{exc.status_code}", "message": str(exc.detail)}},
+        headers=exc.headers,
     )
 
 
@@ -87,4 +90,5 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
 
 app.include_router(rankings.router, prefix="/api/v1")
 app.include_router(repositories.router, prefix="/api/v1")
+app.include_router(repositories.internal_router)
 app.include_router(system.router, prefix="/api/v1")

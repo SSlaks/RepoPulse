@@ -6,17 +6,24 @@ const port = new URL(baseURL).port || "3000";
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: true,
+  timeout: 30_000,
+  globalTimeout: 10 * 60_000,
+  expect: { timeout: 5_000 },
+  workers: process.env.CI ? 2 : 4,
+  retries: process.env.CI ? 1 : 0,
   use: {
     baseURL,
     trace: "on-first-retry",
   },
   webServer: {
-    command: `npm run dev -- --hostname 127.0.0.1 --port ${port}`,
+    command: `npm start -- --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: true,
+    env: { ...process.env, NODE_ENV: "production" },
+    reuseExistingServer: false,
+    timeout: 120_000,
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile", use: { ...devices["Pixel 7"] } },
+    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
   ],
 });

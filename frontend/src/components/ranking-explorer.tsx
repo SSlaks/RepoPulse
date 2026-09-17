@@ -22,7 +22,14 @@ import { FormEvent, useRef, useState } from "react";
 import { MethodologyOnboarding } from "@/components/methodology-onboarding";
 import { RepositoryAvatar } from "@/components/repository-avatar";
 import { rankingApiUrl } from "@/lib/api";
-import { formatCompact, formatDate, formatNumber, formatPercent, rankMovement } from "@/lib/format";
+import {
+  formatCompact,
+  formatDate,
+  formatNumber,
+  formatPercent,
+  formatSignedNumber,
+  rankMovement,
+} from "@/lib/format";
 import { getRepositoryDescription } from "@/lib/repository-copy";
 import type { FilterResponse, Period, RankingFilters, RankingItem, RankingResponse } from "@/lib/types";
 
@@ -42,6 +49,15 @@ const MIN_STAR_OPTIONS = [
   { value: 1000, label: "1,000+ Star" },
   { value: 10000, label: "10,000+ Star" },
 ];
+
+type GrowthState = "positive" | "negative" | "zero" | "unavailable";
+
+function growthState(value: number | null, available = true): GrowthState {
+  if (!available || value === null) return "unavailable";
+  if (value > 0) return "positive";
+  if (value < 0) return "negative";
+  return "zero";
+}
 
 export function RankingExplorer({
   initialData,
@@ -86,10 +102,22 @@ export function RankingExplorer({
     void applyFilters({ q: searchValue.trim() || undefined, page: 1 });
   }
 
-  const leader = data?.data[0];
-  const averageGrowth = data?.data.length
-    ? Math.round(data.data.reduce((sum, item) => sum + item.star_delta, 0) / data.data.length)
-    : 0;
+  const baselineItems = data?.data.filter((item) => item.baseline_available) ?? [];
+  const leader = baselineItems[0];
+  const highestGrowth = baselineItems.length
+    ? Math.max(...baselineItems.map((item) => item.star_delta))
+    : null;
+  const averageGrowth = baselineItems.length
+    ? Math.round(baselineItems.reduce((sum, item) => sum + item.star_delta, 0) / baselineItems.length)
+    : null;
+  const summaryUnavailable = !data || Boolean(error) || loading || !data?.data.length;
+  const leaderLabel = summaryUnavailable
+    ? "--"
+    : baselineItems.length
+      ? leader?.name ?? "--"
+      : data?.data.length
+        ? "历史数据不足"
+        : "--";
 
   return (
     <main>
@@ -148,15 +176,25 @@ export function RankingExplorer({
           <div className="stat-strip">
             <div className="stat-item">
               <span className="stat-icon blue"><TrendingUp size={18} /></span>
-              <div><span>本期领跑</span><strong>{leader?.name ?? "--"}</strong></div>
+              <div><span>本期领跑</span><strong>{leaderLabel}</strong></div>
             </div>
             <div className="stat-item">
               <span className="stat-icon green"><Star size={18} /></span>
-              <div><span>最高增长</span><strong>+{formatNumber(leader?.star_delta ?? 0)}</strong></div>
+              <div>
+                <span>最高增长</span>
+                <strong className={`growth-value ${growthState(highestGrowth, !summaryUnavailable)}`}>
+                  {summaryUnavailable ? "--" : highestGrowth === null ? "历史数据不足" : formatSignedNumber(highestGrowth)}
+                </strong>
+              </div>
             </div>
             <div className="stat-item">
               <span className="stat-icon amber"><Sparkles size={18} /></span>
-              <div><span>榜单平均增长</span><strong>+{formatNumber(averageGrowth)}</strong></div>
+              <div>
+                <span>本页平均增长</span>
+                <strong className={`growth-value ${growthState(averageGrowth, !summaryUnavailable)}`}>
+                  {summaryUnavailable ? "--" : averageGrowth === null ? "历史数据不足" : formatSignedNumber(averageGrowth)}
+                </strong>
+              </div>
             </div>
           </div>
 
@@ -263,10 +301,12 @@ function RankingTable({
                 <td><RepositoryCell item={item} returnTo={returnTo} /></td>
                 <td><LanguageBadge language={item.language} /></td>
                 <td className="numeric">{formatCompact(item.total_stars)}</td>
-                <td className={`numeric growth ${item.baseline_available ? "" : "no-growth"}`}>
-                  {item.baseline_available ? `+${formatNumber(item.star_delta)}` : "无增长"}
+                <td className={`numeric growth ${growthState(item.star_delta, item.baseline_available)}`}>
+                  {item.baseline_available ? formatSignedNumber(item.star_delta) : "历史数据不足"}
                 </td>
-                <td className="numeric rate">{formatPercent(item.growth_rate)}</td>
+                <td className={`numeric rate ${growthState(item.growth_rate, item.baseline_available)}`}>
+                  {formatPercent(item.growth_rate)}
+                </td>
                 <td className="updated">{formatDate(item.last_updated_at)}</td>
                 <td><Link className="row-link" href={repositoryHref(item, returnTo)} aria-label={`查看 ${item.name}`}><ArrowUpRight size={17} /></Link></td>
               </tr>
@@ -280,9 +320,9 @@ function RankingTable({
             <div className="mobile-rank"><RankCell item={item} /></div>
             <RepositoryAvatar owner={item.owner} ownerGithubId={item.owner_github_id} size={42} />
             <div className="mobile-main"><strong>{item.name}</strong><span><LanguageBadge language={item.language} /> · {formatCompact(item.total_stars)} Star</span></div>
-            <div className={`mobile-growth ${item.baseline_available ? "" : "no-growth"}`}>
-              <strong>{item.baseline_available ? `+${formatCompact(item.star_delta)}` : "无增长"}</strong>
-              <span>{item.baseline_available ? `${period} 天` : "无基线"}</span>
+            <div className={`mobile-growth ${growthState(item.star_delta, item.baseline_available)}`}>
+              <strong>{item.baseline_available ? formatSignedNumber(item.star_delta, true) : "历史数据不足"}</strong>
+              <span>{period} 天</span>
             </div>
           </Link>
         ))}

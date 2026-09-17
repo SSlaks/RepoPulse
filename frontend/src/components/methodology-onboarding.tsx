@@ -26,12 +26,12 @@ const METHODOLOGY_STEPS = [
   {
     icon: GitCompareArrows,
     title: "周期增量",
-    copy: "以截止快照减去周期起点快照，计算 1、7、14、30 天真实净增长。",
+    copy: "基线必须落在目标 UTC 日期且不晚于周期边界；没有严格基线就显示历史数据不足，不使用 36 小时回退。",
   },
   {
     icon: ShieldCheck,
     title: "稳定排名",
-    copy: "依次比较净增长、增长率、当前 Star 与仓库名，让结果始终可解释。",
+    copy: "依次比较净增长、增长率、当前 Star 与仓库名；已发布历史榜单不会回溯重算。",
   },
 ] as const;
 

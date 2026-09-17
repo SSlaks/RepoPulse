@@ -1,5 +1,5 @@
 export class AiError extends Error {
-  constructor(public code: string, message: string, public status = 502) { super(message); }
+  constructor(public code: string, message: string, public status = 502, public retryAfter?: number) { super(message); }
 }
 
 export function publicAiError(error: unknown): AiError {

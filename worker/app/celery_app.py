@@ -26,6 +26,8 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     broker_connection_retry_on_startup=True,
+    beat_max_loop_interval=5,
+    worker_prefetch_multiplier=1,
     beat_schedule={
         "recover-collections": {
             "task": "worker.app.tasks.recover_collections",

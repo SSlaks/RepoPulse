@@ -1,0 +1,1 @@
+"""Internal application coordination helpers."""

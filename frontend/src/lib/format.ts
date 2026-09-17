@@ -13,6 +13,12 @@ export function formatNumber(value: number): string {
   return fullNumber.format(value);
 }
 
+export function formatSignedNumber(value: number, compact = false): string {
+  if (value === 0) return "0";
+  const formatted = compact ? formatCompact(value) : formatNumber(value);
+  return value > 0 ? `+${formatted}` : formatted;
+}
+
 export function formatPercent(value: number | null): string {
   if (value === null) return "--";
   return `${(value * 100).toFixed(value >= 0.1 ? 1 : 2)}%`;

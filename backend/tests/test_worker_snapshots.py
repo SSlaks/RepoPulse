@@ -3,14 +3,14 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
-from worker.app import tasks
-from worker.app.snapshots import SnapshotIncomplete
-
 from app.clients.github import GitHubRateLimitError
 from app.config import Settings
 from app.models import Base, RankingItem, Repository, RepoSnapshot
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
+from worker.app import tasks
+from worker.app.snapshots import SnapshotIncomplete
 
 
 @pytest.fixture

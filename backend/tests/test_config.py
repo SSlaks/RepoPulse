@@ -1,8 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from app.config import Settings
-
+from pydantic import ValidationError
 
 PRODUCTION_SETTINGS = {
     "environment": "production",
@@ -11,7 +9,15 @@ PRODUCTION_SETTINGS = {
     "sync_database_url": "postgresql+psycopg://repopulse:db-secret@postgres:5432/repopulse",
     "redis_url": "redis://:redis-secret@redis:6379/0",
     "frontend_origins": "https://repopulse.example.com",
+    "trusted_proxy_token": "test-proxy-token-01234567890123456789",
+    "internal_service_token": "test-service-token-01234567890123456789",
 }
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for field_name in Settings.model_fields:
+        monkeypatch.delenv(field_name.upper(), raising=False)
 
 
 def test_development_configuration_keeps_local_defaults() -> None:

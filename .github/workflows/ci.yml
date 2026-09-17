@@ -18,12 +18,32 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: ruff check app ../worker tests
+      - name: Run Ruff checks
+        run: |
+          ruff check app ../worker tests --ignore I001
+          ruff check --select I tests ../scripts/test_*.py
       - run: mypy app ../worker
       - run: pytest
 
   frontend:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      API_BASE_URL: http://127.0.0.1:8000
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+      ENVIRONMENT: test
+      SEED_DEMO_DATA: "true"
+      REDIS_URL: redis://127.0.0.1:6379/15
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
     defaults:
       run:
         working-directory: frontend
@@ -37,8 +57,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Prepare test database
-        run: mkdir -p .ci && rm -f .ci/frontend.sqlite3
+      - name: Configure isolated browser database
+        run: |
+          database_path="$RUNNER_TEMP/repopulse-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sqlite3"
+          echo "DATABASE_URL=sqlite+aiosqlite:////${database_path#/}" >> "$GITHUB_ENV"
+          echo "SYNC_DATABASE_URL=sqlite:////${database_path#/}" >> "$GITHUB_ENV"
       - run: npm ci
       - run: pip install -e ../backend
       - run: npm run lint
@@ -46,17 +69,62 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - name: Start API
-        env:
-          ENVIRONMENT: development
-          SEED_DEMO_DATA: "true"
-          DATABASE_URL: sqlite+aiosqlite:///./.ci/frontend.sqlite3
-          SYNC_DATABASE_URL: sqlite:///./.ci/frontend.sqlite3
-          REDIS_URL: redis://localhost:6379/0
         run: |
           nohup python -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port 8000 > /tmp/repopulse-api.log 2>&1 &
-          for attempt in {1..20}; do
-            curl --fail --silent http://127.0.0.1:8000/api/v1/health && break
+          ready=false
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/api/v1/health > /dev/null; then
+              ready=true
+              break
+            fi
             sleep 1
           done
-          test -s /tmp/repopulse-api.log && cat /tmp/repopulse-api.log || true
-      - run: npm test -- --project=chromium
+          if [ "$ready" != true ]; then
+            cat /tmp/repopulse-api.log
+            exit 1
+          fi
+          python ../scripts/test_seed_e2e_cache.py
+      - name: Run production-mode browser tests
+        run: npm test
+
+  infrastructure-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: repopulse_test
+          POSTGRES_PASSWORD: repopulse_test_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U repopulse_test -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      RUN_INTEGRATION_TESTS: "1"
+      TEST_RUN_NAMESPACE: ci_${{ github.run_id }}_${{ github.run_attempt }}
+      TEST_POSTGRES_ADMIN_URL: postgresql+psycopg://repopulse_test:repopulse_test_password@127.0.0.1:5432/postgres
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Run disposable PostgreSQL and Redis integration tests
+        run: pytest -q tests/test_infrastructure_integration.py

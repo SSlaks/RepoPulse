@@ -1,7 +1,6 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
-
 from app.ranking.calculator import RepositorySeries, SnapshotPoint, calculate_ranking
 
 NOW = datetime(2026, 9, 6, tzinfo=UTC)
@@ -57,6 +56,45 @@ def test_marks_series_without_recent_baseline_as_no_growth() -> None:
     assert result[0].baseline_available is False
 
 
+def test_matches_baseline_by_utc_target_day() -> None:
+    as_of = datetime(2026, 9, 6, 0, 30, tzinfo=UTC)
+    target_in_new_york = datetime(
+        2026, 9, 4, 20, 0, tzinfo=timezone(timedelta(hours=-4))
+    )
+    repository = RepositorySeries(
+        repository_id=1,
+        full_name="owner/utc-boundary",
+        snapshots=(
+            SnapshotPoint(captured_at=target_in_new_york, stars_count=100),
+            SnapshotPoint(captured_at=as_of, stars_count=110),
+        ),
+    )
+
+    result = calculate_ranking([repository], 1, as_of)
+
+    assert result[0].baseline_available is True
+    assert result[0].net_delta == 10
+
+
+def test_uses_latest_target_day_snapshot_before_cutoff() -> None:
+    as_of = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
+    repository = RepositorySeries(
+        repository_id=1,
+        full_name="owner/intraday",
+        snapshots=(
+            SnapshotPoint(captured_at=as_of - timedelta(days=1, hours=2), stars_count=90),
+            SnapshotPoint(captured_at=as_of - timedelta(days=1, minutes=1), stars_count=100),
+            SnapshotPoint(captured_at=as_of - timedelta(days=1) + timedelta(minutes=1), stars_count=1),
+            SnapshotPoint(captured_at=as_of, stars_count=115),
+        ),
+    )
+
+    result = calculate_ranking([repository], 1, as_of)
+
+    assert result[0].start_stars == 100
+    assert result[0].net_delta == 15
+
+
 def test_includes_series_without_snapshots_using_current_stars() -> None:
     result = calculate_ranking(
         [series(1, "owner/new", [], current_stars=240)],
@@ -91,8 +129,22 @@ def test_allows_negative_growth_and_zero_baseline() -> None:
 
     new_repo = next(item for item in result if item.full_name == "owner/new")
     decreased = next(item for item in result if item.full_name == "owner/decrease")
+    assert new_repo.baseline_available is True
+    assert new_repo.net_delta == 40
     assert new_repo.growth_rate is None
+    assert decreased.baseline_available is True
     assert decreased.net_delta == -10
+    assert decreased.growth_rate == pytest.approx(-0.1)
+
+
+def test_no_baseline_does_not_report_synthetic_growth() -> None:
+    result = calculate_ranking([series(1, "owner/new", [(0, 50)])], 7, NOW)
+
+    assert result[0].start_stars == 50
+    assert result[0].end_stars == 50
+    assert result[0].net_delta == 0
+    assert result[0].growth_rate is None
+    assert result[0].baseline_available is False
 
 
 def test_rejects_unsupported_period() -> None:

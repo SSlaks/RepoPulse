@@ -11,18 +11,49 @@ x-container-hardening: &container-hardening
     - /tmp:rw,noexec,nosuid,size=64m
 
 x-backend-service: &backend-service
-  image: repopulse-backend:local
+  image: ${BACKEND_IMAGE:-repopulse-backend:local}
   build:
     context: .
     dockerfile: backend/Dockerfile
+    args:
+      VCS_REF: ${GIT_SHA:-local}
   <<: *container-hardening
   networks:
     - backend
     - egress
 
+x-backend-environment: &backend-environment
+  ENVIRONMENT: production
+  SEED_DEMO_DATA: "false"
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+  SYNC_DATABASE_URL: ${SYNC_DATABASE_URL:?Set SYNC_DATABASE_URL}
+  REDIS_URL: ${REDIS_URL:?Set REDIS_URL}
+  FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:?Set FRONTEND_ORIGINS}
+  TRUSTED_PROXY_TOKEN: ${TRUSTED_PROXY_TOKEN:-}
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  CANDIDATE_LANGUAGES: ${CANDIDATE_LANGUAGES:-TypeScript,JavaScript,Python,Go,Rust,Java,C++,C#,Swift,Kotlin,PHP,Ruby,Dart,Shell}
+  CANDIDATE_TOPICS: ${CANDIDATE_TOPICS:-ai,llm,developer-tools,database,web-framework,self-hosted}
+  MANUAL_SEED_REPOSITORIES: ${MANUAL_SEED_REPOSITORIES:-}
+  EXCLUDED_REPOSITORIES: ${EXCLUDED_REPOSITORIES:-}
+  REPOSITORY_AUTO_QUARANTINE: ${REPOSITORY_AUTO_QUARANTINE:-false}
+  REPOSITORY_PROBE_ENABLED: ${REPOSITORY_PROBE_ENABLED:-true}
+  SNAPSHOT_DEADLINE_HOURS: ${SNAPSHOT_DEADLINE_HOURS:-6}
+  RANKING_MIN_COMPLETENESS_PERCENT: ${RANKING_MIN_COMPLETENESS_PERCENT:-95}
+  MAX_ACTIVE_REPOSITORIES: ${MAX_ACTIVE_REPOSITORIES:-5000}
+  GITHUB_SEARCH_PAGES: ${GITHUB_SEARCH_PAGES:-2}
+  SNAPSHOT_CONCURRENCY: ${SNAPSHOT_CONCURRENCY:-4}
+  SNAPSHOT_REQUESTS_PER_SECOND: ${SNAPSHOT_REQUESTS_PER_SECOND:-4}
+  SNAPSHOT_BATCH_SIZE: ${SNAPSHOT_BATCH_SIZE:-50}
+  SNAPSHOT_FLUSH_SECONDS: ${SNAPSHOT_FLUSH_SECONDS:-5}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.05}
+  AVATAR_CACHE_DIR: /var/cache/repopulse/avatars
+
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
@@ -39,6 +70,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
@@ -50,45 +82,49 @@ services:
     networks:
       - backend
 
+  migrate:
+    <<: *backend-service
+    working_dir: /app/backend
+    command: ["alembic", "-c", "/app/backend/alembic.ini", "upgrade", "head"]
+    restart: "no"
+    environment: *backend-environment
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     <<: *backend-service
-    command: ["sh", "-c", "cd /app/backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
-    environment: &backend-env
-      ENVIRONMENT: production
-      SEED_DEMO_DATA: "false"
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
-      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL:?Set SYNC_DATABASE_URL}
-      REDIS_URL: ${REDIS_URL:?Set REDIS_URL}
-      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:?Set FRONTEND_ORIGINS}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      CANDIDATE_LANGUAGES: ${CANDIDATE_LANGUAGES:-TypeScript,JavaScript,Python,Go,Rust,Java,C++,C#,Swift,Kotlin,PHP,Ruby,Dart,Shell}
-      CANDIDATE_TOPICS: ${CANDIDATE_TOPICS:-ai,llm,developer-tools,database,web-framework,self-hosted}
-      MANUAL_SEED_REPOSITORIES: ${MANUAL_SEED_REPOSITORIES:-}
-      EXCLUDED_REPOSITORIES: ${EXCLUDED_REPOSITORIES:-}
-      REPOSITORY_AUTO_QUARANTINE: ${REPOSITORY_AUTO_QUARANTINE:-false}
-      REPOSITORY_PROBE_ENABLED: ${REPOSITORY_PROBE_ENABLED:-true}
-      SNAPSHOT_DEADLINE_HOURS: ${SNAPSHOT_DEADLINE_HOURS:-6}
-      RANKING_MIN_COMPLETENESS_PERCENT: ${RANKING_MIN_COMPLETENESS_PERCENT:-95}
-      MAX_ACTIVE_REPOSITORIES: ${MAX_ACTIVE_REPOSITORIES:-5000}
-      GITHUB_SEARCH_PAGES: ${GITHUB_SEARCH_PAGES:-2}
-      SNAPSHOT_CONCURRENCY: ${SNAPSHOT_CONCURRENCY:-4}
-      SNAPSHOT_REQUESTS_PER_SECOND: ${SNAPSHOT_REQUESTS_PER_SECOND:-4}
-      SNAPSHOT_BATCH_SIZE: ${SNAPSHOT_BATCH_SIZE:-50}
-      SNAPSHOT_FLUSH_SECONDS: ${SNAPSHOT_FLUSH_SECONDS:-5}
-      SENTRY_DSN: ${SENTRY_DSN:-}
-      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.05}
-      AVATAR_CACHE_DIR: /var/cache/repopulse/avatars
+    restart: unless-stopped
+    working_dir: /app/backend
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *backend-environment
     volumes:
       - repopulse-avatar-cache:/var/cache/repopulse/avatars:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request; response = urllib.request.urlopen("http://127.0.0.1:8000/api/v1/ready", timeout=3); raise SystemExit(0 if response.status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
   avatar-cache-init:
-    image: repopulse-backend:local
+    image: ${BACKEND_IMAGE:-repopulse-backend:local}
     command: ["sh", "-c", "chown -R 10001:10001 /var/cache/repopulse/avatars"]
+    restart: "no"
     user: "0:0"
     security_opt:
       - no-new-privileges:true
@@ -104,13 +140,22 @@ services:
 
   worker:
     <<: *backend-service
-    command: ["celery", "-A", "worker.app.celery_app.celery_app", "worker", "--loglevel=INFO"]
-    environment: *backend-env
+    restart: unless-stopped
+    command: ["celery", "-A", "worker.app.celery_app.celery_app", "worker", "--loglevel=INFO", "--hostname=worker@%h"]
+    environment: *backend-environment
     volumes:
       - repopulse-avatar-cache:/var/cache/repopulse/avatars
+    healthcheck:
+      test: ["CMD", "python", "-m", "worker.app.health", "worker"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       avatar-cache-init:
@@ -118,21 +163,35 @@ services:
 
   beat:
     <<: *backend-service
-    command: ["celery", "-A", "worker.app.celery_app.celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
-    environment: *backend-env
+    restart: unless-stopped
+    command: ["celery", "-A", "worker.app.celery_app.celery_app", "beat", "--loglevel=INFO", "--scheduler=worker.app.health.HeartbeatScheduler", "--schedule=/tmp/celerybeat-schedule"]
+    environment: *backend-environment
+    healthcheck:
+      test: ["CMD", "python", "-m", "worker.app.health", "beat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       worker:
-        condition: service_started
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
+    image: ${FRONTEND_IMAGE:-repopulse-frontend:local}
+    restart: unless-stopped
     build:
       context: ./frontend
       args:
-        API_BASE_URL: http://api:8000
+        API_BASE_URL: ${API_BASE_URL:-http://api:8000}
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL}
+        VCS_REF: ${GIT_SHA:-local}
     environment:
-      API_BASE_URL: http://api:8000
+      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL}
+      TRUSTED_PROXY_TOKEN: ${TRUSTED_PROXY_TOKEN:-}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-}
     <<: *container-hardening
     networks:
       - edge
@@ -142,9 +201,15 @@ services:
       - /app/.next/cache:rw,noexec,nosuid,size=128m
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   repopulse-postgres:

@@ -7,12 +7,24 @@ services:
     ports:
       - "127.0.0.1:6379:6379"
 
+  migrate:
+    environment:
+      ENVIRONMENT: development
+      SEED_DEMO_DATA: "true"
+      FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      TRUSTED_PROXY_TOKEN: dev-only-trusted-proxy-token-32-bytes
+      INTERNAL_SERVICE_TOKEN: dev-only-internal-service-token-32b
+    volumes:
+      - ./backend:/app/backend
+
   api:
     environment:
       ENVIRONMENT: development
       SEED_DEMO_DATA: "true"
       FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
-    command: ["sh", "-c", "cd /app/backend && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+      TRUSTED_PROXY_TOKEN: dev-only-trusted-proxy-token-32-bytes
+      INTERNAL_SERVICE_TOKEN: dev-only-internal-service-token-32b
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -23,6 +35,8 @@ services:
       ENVIRONMENT: development
       SEED_DEMO_DATA: "true"
       FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      TRUSTED_PROXY_TOKEN: dev-only-trusted-proxy-token-32-bytes
+      INTERNAL_SERVICE_TOKEN: dev-only-internal-service-token-32b
     volumes:
       - ./backend:/app/backend
       - ./worker:/app/worker
@@ -32,10 +46,15 @@ services:
       ENVIRONMENT: development
       SEED_DEMO_DATA: "true"
       FRONTEND_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      TRUSTED_PROXY_TOKEN: dev-only-trusted-proxy-token-32-bytes
+      INTERNAL_SERVICE_TOKEN: dev-only-internal-service-token-32b
     volumes:
       - ./backend:/app/backend
       - ./worker:/app/worker
 
   frontend:
+    environment:
+      TRUSTED_PROXY_TOKEN: dev-only-trusted-proxy-token-32-bytes
+      INTERNAL_SERVICE_TOKEN: dev-only-internal-service-token-32b
     ports:
       - "127.0.0.1:3000:3000"

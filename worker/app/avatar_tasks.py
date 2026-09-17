@@ -1,10 +1,10 @@
 import httpx
-from celery import Task
-from sqlalchemy import select
-
 from app.avatar_cache import download_avatar
 from app.database import get_sync_session
 from app.models import Repository
+from celery import Task
+from sqlalchemy import select
+
 from worker.app.celery_app import celery_app
 
 

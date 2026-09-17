@@ -1,6 +1,8 @@
 import { ArrowUpRight, FileText } from "lucide-react";
+import { headers } from "next/headers";
 import { ReadmeAi } from "@/components/readme-ai";
 import { fetchReadme } from "@/lib/api";
+import { copyTrustedProxyHeaders } from "@/lib/trusted-proxy";
 
 import type { ReadmeResponse } from "@/lib/types";
 
@@ -12,7 +14,7 @@ interface RepositoryReadmeProps {
 export async function RepositoryReadme({ owner, name }: RepositoryReadmeProps) {
   let readme: ReadmeResponse | null = null;
   try {
-    readme = await fetchReadme(owner, name);
+    readme = await fetchReadme(owner, name, copyTrustedProxyHeaders(await headers()));
   } catch {
     // Keep the existing empty state when GitHub is unavailable.
   }

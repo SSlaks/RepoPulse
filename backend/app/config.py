@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     seed_demo_data: bool = False
     frontend_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     environment: str = "development"
+    trusted_proxy_token: str | None = None
+    internal_service_token: str | None = None
     avatar_cache_dir: str = "/tmp/repopulse-avatars"
     avatar_cache_max_bytes: int = 524288000
     avatar_refresh_days: int = 7
@@ -66,6 +68,15 @@ class Settings(BaseSettings):
         redis = urlsplit(self.redis_url)
         if redis.scheme not in {"redis", "rediss"} or not redis.hostname or not redis.password:
             errors.append("REDIS_URL must include a Redis host and password")
+
+        for variable, token_value in (
+            ("TRUSTED_PROXY_TOKEN", self.trusted_proxy_token),
+            ("INTERNAL_SERVICE_TOKEN", self.internal_service_token),
+        ):
+            if not token_value or len(token_value) < 32 or token_value.startswith("CHANGE_ME"):
+                errors.append(f"{variable} must be a random value of at least 32 characters")
+        if self.trusted_proxy_token and self.trusted_proxy_token == self.internal_service_token:
+            errors.append("TRUSTED_PROXY_TOKEN and INTERNAL_SERVICE_TOKEN must be different")
 
         if not self.cors_origins:
             errors.append("FRONTEND_ORIGINS must contain at least one HTTPS origin")

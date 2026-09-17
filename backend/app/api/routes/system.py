@@ -1,7 +1,11 @@
+import asyncio
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
+from redis.exceptions import RedisError
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import response_cache
@@ -10,6 +14,8 @@ from app.schemas import FilterResponse, HealthResponse
 from app.services.catalog import CatalogService
 
 router = APIRouter(tags=["system"])
+logger = logging.getLogger(__name__)
+READINESS_TIMEOUT_SECONDS = 2.0
 
 
 @router.get("/filters", response_model=FilterResponse)
@@ -29,8 +35,18 @@ async def readiness(
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> HealthResponse:
-    await session.execute(text("SELECT 1"))
-    redis_ready = await response_cache.ping()
+    try:
+        _, redis_ready = await asyncio.wait_for(
+            asyncio.gather(
+                session.execute(text("SELECT 1")),
+                response_cache.ping(),
+            ),
+            timeout=READINESS_TIMEOUT_SECONDS,
+        )
+    except (OSError, RedisError, SQLAlchemyError, TimeoutError) as exc:
+        logger.warning("API readiness dependency check failed", exc_info=exc)
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return HealthResponse(status="degraded", service="api")
     if not redis_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(status="degraded", service="api")

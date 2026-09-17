@@ -10,13 +10,13 @@ from threading import Timer
 from time import monotonic
 
 import httpx
-from sqlalchemy import create_engine, func, select, update
-from sqlalchemy.orm import sessionmaker
-
 from app.clients.github import GitHubClient, GitHubRateLimitError
 from app.config import get_settings
 from app.database import get_sync_session
 from app.models import Base, JobRun, Repository, RepoSnapshot
+from sqlalchemy import create_engine, func, select, update
+from sqlalchemy.orm import sessionmaker
+
 from worker.app.snapshots import (
     SnapshotCancelled,
     SnapshotCollector,

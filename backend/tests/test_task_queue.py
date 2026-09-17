@@ -1,9 +1,8 @@
 from unittest.mock import Mock
 
-from celery.exceptions import OperationalError
-
 from app import task_queue
 from app.config import get_settings
+from celery.exceptions import OperationalError
 
 
 def test_avatar_sender_uses_configured_redis_broker() -> None:

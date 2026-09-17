@@ -3,10 +3,9 @@ from typing import Self
 from unittest.mock import Mock
 
 import pytest
+from app.api.routes import repositories
 from fastapi import BackgroundTasks
 from fastapi.responses import FileResponse
-
-from app.api.routes import repositories
 
 
 class StubSession:

@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+ARG VCS_REF=local
+
+LABEL org.opencontainers.image.revision=$VCS_REF
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/backend:/app

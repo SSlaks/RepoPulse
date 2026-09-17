@@ -2,11 +2,21 @@ import { z } from "zod";
 import { eventSchema, modelListResponseSchema, type ModelListRequest, type ModelList, type AiCredentials, type AiEvent, type ReadmeMode, type AiResult, type SummaryResult, type TranslationResult } from "./contracts";
 
 const errorSchema = z.object({ error: z.object({ message: z.string() }) });
+
+function retryAfterSeconds(response: Response): number | undefined {
+  const value = response.headers.get("Retry-After");
+  if (!value) return undefined;
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : undefined;
+}
+
 async function post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
   const response = await fetch(`/api/ai/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal, cache: "no-store" });
   if (!response.ok) {
     const parsed = errorSchema.safeParse(await response.json().catch(() => null));
-    throw new Error(parsed.success ? parsed.data.error.message : "AI 服务暂时不可用，请稍后重试。");
+    const message = parsed.success ? parsed.data.error.message : "AI 服务暂时不可用，请稍后重试。";
+    const retryAfter = response.status === 429 ? retryAfterSeconds(response) : undefined;
+    throw new Error(retryAfter ? `${message} ${retryAfter} 秒后可重试。` : message);
   }
   return response;
 }

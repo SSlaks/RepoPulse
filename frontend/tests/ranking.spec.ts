@@ -5,8 +5,17 @@ const ONE_PIXEL_PNG = Buffer.from(
   "base64",
 );
 
+interface RankingFixtureRepository {
+  owner: string;
+  name: string;
+  ownerGithubId: number | null;
+  starDelta?: number;
+  growthRate?: number | null;
+  baselineAvailable?: boolean;
+}
+
 function rankingResponse(
-  repositories: Array<{ owner: string; name: string; ownerGithubId: number | null }>,
+  repositories: RankingFixtureRepository[],
   options: { page?: number; limit?: number; total?: number } = {},
 ) {
   const page = options.page ?? 1;
@@ -23,9 +32,9 @@ function rankingResponse(
       language: "TypeScript",
       topics: ["testing"],
       total_stars: 1_000 - index,
-      star_delta: 10 - index,
-      growth_rate: 0.01,
-      baseline_available: true,
+      star_delta: repository.starDelta ?? 10 - index,
+      growth_rate: repository.growthRate === undefined ? 0.01 : repository.growthRate,
+      baseline_available: repository.baselineAvailable ?? true,
       last_updated_at: "2026-09-12T00:00:00Z",
       github_url: `https://github.com/${repository.owner}/${repository.name}`,
     })),
@@ -45,7 +54,7 @@ function rankingResponse(
 
 async function loadMockRanking(
   page: Page,
-  repositories: Array<{ owner: string; name: string; ownerGithubId: number | null }>,
+  repositories: RankingFixtureRepository[],
 ) {
   await page.route("**/api/v1/rankings?**", async (route) => {
     await route.fulfill({
@@ -154,6 +163,90 @@ test("榜单支持周期切换、筛选和详情跳转", async ({ page }, testIn
   await expect(page).toHaveURL(/\/repo\//);
   await expect(page.getByText("Star 趋势")).toBeVisible();
   await expect(page.locator(".recharts-responsive-container svg")).toBeVisible();
+});
+
+test("增长值保留正负号且缺少历史基线不伪装成零增长", async ({ page }) => {
+  await loadMockRanking(page, [
+    {
+      owner: "fixture",
+      name: "missing-baseline",
+      ownerGithubId: null,
+      starDelta: 999,
+      growthRate: null,
+      baselineAvailable: false,
+    },
+    {
+      owner: "fixture",
+      name: "positive-growth",
+      ownerGithubId: null,
+      starDelta: 25,
+      growthRate: 0.25,
+    },
+    {
+      owner: "fixture",
+      name: "negative-growth",
+      ownerGithubId: null,
+      starDelta: -7,
+      growthRate: -0.07,
+    },
+    {
+      owner: "fixture",
+      name: "zero-growth",
+      ownerGithubId: null,
+      starDelta: 0,
+      growthRate: 0,
+    },
+  ]);
+
+  const growthFor = (name: string) =>
+    page.locator(".ranking-table tbody tr").filter({ hasText: name }).locator("td.growth");
+  await expect(growthFor("positive-growth")).toHaveText("+25");
+  await expect(growthFor("negative-growth")).toHaveText("-7");
+  await expect(growthFor("zero-growth")).toHaveText("0");
+  await expect(growthFor("missing-baseline")).toHaveText("历史数据不足");
+
+  const highest = page.locator(".stat-item").filter({ hasText: "最高增长" });
+  const average = page.locator(".stat-item").filter({ hasText: "本页平均增长" });
+  await expect(highest.locator("strong")).toHaveText("+25");
+  await expect(average.locator("strong")).toHaveText("+6");
+  await expect(page.getByText("历史数据不足", { exact: true })).toHaveCount(2);
+});
+
+test("摘要仅统计当前页有效基线，负增长和全缺失页仍如实展示", async ({ page }) => {
+  await page.route("**/api/v1/rankings?**", async (route) => {
+    const requestedPage = Number(new URL(route.request().url()).searchParams.get("page") ?? "1");
+    const repositories: RankingFixtureRepository[] = requestedPage === 1
+      ? [{ owner: "fixture", name: "first-page", ownerGithubId: null, starDelta: 100 }]
+      : requestedPage === 2
+        ? [
+          { owner: "fixture", name: "decrease-seven", ownerGithubId: null, starDelta: -7 },
+          { owner: "fixture", name: "decrease-three", ownerGithubId: null, starDelta: -3 },
+          { owner: "fixture", name: "untracked", ownerGithubId: null, baselineAvailable: false },
+        ]
+        : [{ owner: "fixture", name: "all-untracked", ownerGithubId: null, baselineAvailable: false }];
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(rankingResponse(repositories, { page: requestedPage, total: 45 })),
+    });
+  });
+
+  await page.goto("/?period=7");
+  await enterRanking(page);
+  await page.getByRole("button", { name: "14 天" }).click();
+  const highest = page.locator(".stat-item").filter({ hasText: "最高增长" }).locator("strong");
+  const average = page.locator(".stat-item").filter({ hasText: "本页平均增长" }).locator("strong");
+  await expect(highest).toHaveText("+100");
+
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.getByText("第 2 / 3 页")).toBeVisible();
+  await expect(highest).toHaveText("-3");
+  await expect(average).toHaveText("-5");
+
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.getByText("第 3 / 3 页")).toBeVisible();
+  await expect(highest).toHaveText("历史数据不足");
+  await expect(average).toHaveText("历史数据不足");
 });
 
 test("分页支持指定页跳转并拦截非法页码", async ({ page }) => {
