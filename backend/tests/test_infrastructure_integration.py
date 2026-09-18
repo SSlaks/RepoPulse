@@ -82,7 +82,7 @@ async def test_redis_failure_returns_http_503(monkeypatch: pytest.MonkeyPatch) -
     get_settings.cache_clear()
     coordinator = limiter_module.RedisLimiter()
     monkeypatch.setattr("app.api.routes.repositories.limiter", coordinator)
-    monkeypatch.setattr("app.services.catalog.limiter", coordinator)
+    monkeypatch.setattr("app.services.readme.limiter", coordinator)
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
