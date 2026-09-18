@@ -62,6 +62,32 @@ predeploy 备份；每次用 `--force-recreate` 执行一次 `migrate` 服务；
 `alembic upgrade head`。API 的 `/api/v1/ready` 会在数据库或 Redis 不可达、异常或超过
 两秒时返回 503；前端 `/api/health` 只检查 Next 进程本身。
 
+## README 预热与状态
+
+README 正文和刷新状态位于 PostgreSQL 的 `repository_readmes`。Redis 只提供短 TTL 的
+`readme:v2:*` 加速缓存、队列去重标记和任务锁；不要用 Redis 恢复 README，也不要为此清空
+共享队列或修改全局 eviction/persistence。API 冷缺时只入队 Worker 并返回 `503`/`Retry-After`，
+不会在访客请求里同步访问 GitHub。已有正文在 Redis 不可用时仍从数据库返回，后台失败也不删除
+旧正文。发现仓库变为 private 后，Worker 会隐藏旧正文并清理 v2 key。
+
+Beat 默认每 10 分钟投递一个最多 100 条的 README 批次；Worker 会在快照/发现任务活跃、配额
+低于保留值、任务超时或无法取得 Redis 锁时保存 `waiting` 和 `resume_at` 后退出。历史失联的
+`running`/`waiting` 任务按当前时间和启动时间判断，不会永久阻塞 README。GitHub 配额可能与
+同一账号的其他应用共享，多个配置 Token 也不构成独立额度。
+
+运维查看覆盖率、预热或取消任务：
+
+```bash
+docker compose exec -T worker python -m worker.app.readme_admin status
+docker compose exec -T worker python -m worker.app.readme_admin warmup --limit 100
+docker compose exec -T worker python -m worker.app.readme_admin cancel --job-key '<job-key>'
+```
+
+`status` 输出仓库总数、已有正文、缺失正文、private/隐藏数量、最近任务和最早
+`resume_at`。`cancel` 只设置持久化的取消标记，Worker 在下一次边界退出；周期 Beat 会在
+之后按到期状态继续安排任务。部署新版本时先完成备份，再执行 `alembic upgrade head`，确认
+`repository_readmes` 已创建后再启动 Worker/Beat。
+
 ## 恢复到新库
 
 不传 `--target-db` 时，CLI 会生成一个新的 `repopulse_restore_...` 数据库名。恢复前会

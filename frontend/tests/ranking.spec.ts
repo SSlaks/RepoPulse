@@ -1,4 +1,9 @@
 import { expect, type Page, test } from "@playwright/test";
+import { setReadmeTestIdentity } from "./readme-test-identity";
+
+test.beforeEach(async ({ page }, testInfo) => {
+  await setReadmeTestIdentity(page, testInfo);
+});
 
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",

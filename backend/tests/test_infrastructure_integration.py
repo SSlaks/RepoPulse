@@ -95,9 +95,6 @@ async def test_redis_failure_returns_http_503(monkeypatch: pytest.MonkeyPatch) -
             assert response.status_code == 503
             assert response.headers["retry-after"] == "5"
             assert response.headers["cache-control"] == "no-store"
-            response = await client.get("/api/v1/repos/test/repo/readme")
-            assert response.status_code == 503
-            assert response.headers["retry-after"] == "5"
     finally:
         await coordinator.close()
         get_settings.cache_clear()

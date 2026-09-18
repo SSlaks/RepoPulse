@@ -29,19 +29,30 @@ export type LeaseHandle = {
   release(): Promise<void>;
 };
 
-function isProduction(): boolean {
-  return process.env.NODE_ENV === "production";
+function configuredEnvironment(): string | undefined {
+  const value = process.env.ENVIRONMENT?.trim().toLowerCase();
+  return value || undefined;
+}
+
+function isLocalEnvironment(): boolean {
+  const environment = configuredEnvironment();
+  if (environment) return environment === "development" || environment === "test";
+  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+}
+
+function requiresCoordinator(): boolean {
+  return process.env.NODE_ENV === "production" || configuredEnvironment() !== undefined;
 }
 
 function identityHeaders(request: Request): Headers | null {
   const headers = copyTrustedProxyHeaders(request.headers);
-  if (isProduction() && (!headers.has(TRUSTED_CLIENT_IP_HEADER) || !headers.has(TRUSTED_PROXY_TOKEN_HEADER))) {
+  if (!isLocalEnvironment() && (!headers.has(TRUSTED_CLIENT_IP_HEADER) || !headers.has(TRUSTED_PROXY_TOKEN_HEADER))) {
     throw new AiError("IDENTITY_UNAVAILABLE", "可信客户端身份暂时不可用，请稍后重试。", 503, 5);
   }
 
   const serviceToken = process.env.INTERNAL_SERVICE_TOKEN;
   if (!serviceToken) {
-    if (isProduction()) throw new AiError("LIMITER_UNAVAILABLE", "限流服务暂时不可用，请稍后重试。", 503, 5);
+    if (requiresCoordinator()) throw new AiError("LIMITER_UNAVAILABLE", "限流服务暂时不可用，请稍后重试。", 503, 5);
     return null;
   }
   headers.set(INTERNAL_SERVICE_TOKEN_HEADER, serviceToken);

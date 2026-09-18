@@ -10,7 +10,7 @@
 - `frontend/tests/ranking.spec.ts`：补正/负/零/无基线展示、当前页有效基线摘要、负增长页及全无基线页行为。
 - `backend/tests/test_infrastructure_integration.py`：默认跳过，显式 `RUN_INTEGRATION_TESTS=1` 且仅限 loopback 专用测试地址；逐例创建唯一 PostgreSQL 数据库并销毁，验证空库与上一修订迁移、保留数据、事务回滚/行锁；Redis 仅使用非零 DB 的唯一键，验证原子递增/TTL、worker lock 排他与重获，结束只删除测试键。真实 limiter API 尚未定稿，后续补相应 hook 断言。
 - `frontend/playwright.config.ts`：`npm start` 生产模式、不复用已有服务器、2/4 workers、明确 timeout、desktop/mobile Chromium 项目。
-- `.github/workflows/ci.yml`、`scripts/test_seed_e2e_cache.py`：前端 CI 先 build 后启动生产服务器；独立 SQLite 路径、Redis 7 非默认 DB、显式 demo 数据与固定 README 缓存，避免 GitHub/AI 外呼；独立 PostgreSQL 16 + Redis 7 job 运行可抛弃集成测试。
+- `.github/workflows/ci.yml`、`scripts/test_seed_e2e_cache.py`：前端 CI 先 build 后启动生产服务器；独立 SQLite 路径、Redis 7 非默认 DB、显式 demo 数据与 `repository_readmes` 真源 README，避免 GitHub/AI 外呼；独立 PostgreSQL 16 + Redis 7 job 运行可抛弃集成测试。
 
 ## 已执行验证
 
@@ -22,4 +22,4 @@
 
 ## 后续必验
 
-Luna 完成并停止写入后，运行完整后端 pytest/Ruff/mypy、生产 build 与 desktop/mobile 浏览器测试；显式开启 PostgreSQL/Redis 集成测试（只用唯一 `repopulse-test-*` 临时容器/服务，不用现有卷）。根据 Redis limiter、可信代理 token、内部 FastAPI lease coordinator 最终 API 增补测试；当下未假定未知函数名。检查 CI 中 demo API、固定 README 缓存在全部浏览器测试期间不触发外部网络。当前未运行全套或 Docker 集成，尚不能声称 CI/浏览器通过。
+Luna 完成并停止写入后，运行完整后端 pytest/Ruff/mypy、生产 build 与 desktop/mobile 浏览器测试；显式开启 PostgreSQL/Redis 集成测试（只用唯一 `repopulse-test-*` 临时容器/服务，不用现有卷）。根据 Redis limiter、可信代理 token、内部 FastAPI lease coordinator 最终 API 增补测试；当下未假定未知函数名。检查 CI 中 demo API、固定 README 真源在全部浏览器测试期间不触发外部网络。当前未运行全套或 Docker 集成，尚不能声称 CI/浏览器通过。

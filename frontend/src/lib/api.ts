@@ -68,7 +68,7 @@ export async function fetchReadme(
   name: string,
   headers?: HeadersInit,
 ): Promise<ReadmeResponse> {
-  return getJson<ReadmeResponse>(`${SERVER_API_BASE}/api/v1/repos/${owner}/${name}/readme`, 3600, headers);
+  return getJson<ReadmeResponse>(`${SERVER_API_BASE}/api/v1/repos/${owner}/${name}/readme`, null, headers);
 }
 
 export async function fetchSnapshots(

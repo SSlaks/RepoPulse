@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     avatar_download_concurrency: int = 2
     avatar_request_timeout: float = 15
     avatar_warmup_limit: int = 100
+    readme_refresh_hours: int = Field(default=24, ge=1, le=168)
+    readme_batch_size: int = Field(default=100, ge=1, le=500)
+    readme_refresh_interval_seconds: int = Field(default=600, ge=60, le=3600)
+    readme_requests_per_second: float = Field(default=0.5, gt=0, le=2)
+    readme_quota_reserve: int = Field(default=1000, ge=0, le=5000)
+    readme_job_timeout_seconds: int = Field(default=1800, ge=60, le=7200)
+    readme_failure_backoff_seconds: int = Field(default=300, ge=30, le=86_400)
+    readme_queue_cooldown_seconds: int = Field(default=300, ge=30, le=3600)
+    readme_collection_pause_hours: int = Field(default=6, ge=1, le=24)
+    readme_cache_ttl_seconds: int = Field(default=300, ge=30, le=3600)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

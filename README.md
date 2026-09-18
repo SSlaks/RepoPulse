@@ -45,6 +45,12 @@ Copy-Item .env.example .env
 docker compose up -d --build
 ```
 
+开发 Compose 的前端虽然使用生产构建，但会显式设置 `ENVIRONMENT=development`。本机直连
+`localhost:3000` 没有反向代理注入可信客户端身份，因此前端会以受信的 `internal` 身份调用
+共享 Redis 限流协调器；`INTERNAL_SERVICE_TOKEN` 只存在于服务端容器环境变量中，不会发送给浏览器。
+生产主配置固定使用 `ENVIRONMENT=production`，缺少可信代理身份或内部服务 token 时会直接返回
+`503`，不会降级为本地内存限流。单独运行 `npm run dev` 时保留 Next.js 开发环境的本地回退语义。
+
 生产部署必须复制并填写 `.env.production.example`，不要加载开发 override；生产主配置会固定关闭演示数据，并拒绝 SQLite、空密码和 localhost Origin：
 
 ```powershell
@@ -126,6 +132,47 @@ docker compose exec -T worker python -m worker.app.benchmark --limit 0 --timeout
 临时库验证主要衡量网络吞吐，不替代生产 PostgreSQL 写入性能验证。
 按约 3,500 个仓库、每次请求约一秒估算，快照目标为 16–22 分钟，
 发现加快照的累计处理时间为 18–27 分钟；不包含两个定时任务之间的空闲时间或限流等待。
+
+### README 持久化与后台预热
+
+公开、已收录仓库的 README 原文写入 PostgreSQL 的 `repository_readmes` 表，表中同时保存
+中文 README 根目录选择、根目录 ETag、文件 ETag、成功/检查时间、下一次刷新时间和退避错误。
+数据库是正文真源；Redis 只使用 `readme:v2:*` 的短 TTL 响应缓存和短时队列去重标记，不能用
+Redis 数据恢复正文，也不会改动全局 eviction、持久化策略或清空共享队列。README 不使用头像
+文件缓存。刷新失败不会删除已保存正文；若 GitHub 元数据确认仓库变为 private，API 会立即隐藏
+旧正文并使 v2 缓存失效。
+
+API 只接受当前榜单中已收录的仓库。冷缺 README 只入队后台刷新并返回 `503` 与
+`Retry-After`，请求本身不会同步访问 GitHub；已有正文即使 Redis 不可用也会从数据库返回，
+陈旧正文同时触发带 Redis NX 去重的后台任务。Next.js README 请求使用 `no-store`，避免把
+private 状态或后台更新延迟到页面缓存过期后才生效。
+
+README Worker 默认每 10 分钟运行一批，单批最多 100 个仓库，按无正文、到期时间和 Star 数
+排序，目标每 24 小时重新验证。它单并发低速请求，并在每次 GitHub 请求前检查真实 core
+配额和 `README_QUOTA_RESERVE`（默认 1000）；配额不足、快照/发现任务活跃、Redis 锁不可证明
+或任务超过时间限制时会保存 `waiting`/`resume_at` 后退出，不会无限睡眠。GitHub Token 与其他
+应用共享配额，配置多个 Token 也不应视为独立额度。
+
+可在 Worker 容器中查看覆盖率和任务状态、请求取消或预热：
+
+```powershell
+docker compose exec -T worker python -m worker.app.readme_admin status
+docker compose exec -T worker python -m worker.app.readme_admin warmup --limit 100
+docker compose exec -T worker python -m worker.app.readme_admin cancel --job-key <job-key>
+```
+
+主要配置如下；调度、批次和退避值会同时传给 API、Worker 和 Beat：
+
+| 环境变量 | 默认值 | 用途 |
+|---|---:|---|
+| `README_BATCH_SIZE` | 100 | 周期任务单批上限 |
+| `README_REFRESH_INTERVAL_SECONDS` | 600 | Beat 周期（10 分钟） |
+| `README_REFRESH_HOURS` | 24 | 正文成功后再次检查的间隔 |
+| `README_REQUESTS_PER_SECOND` | 0.5 | README 单并发请求速率 |
+| `README_QUOTA_RESERVE` | 1000 | 每次请求保留的 GitHub core 配额 |
+| `README_JOB_TIMEOUT_SECONDS` | 1800 | 单批软时间限制 |
+| `README_FAILURE_BACKOFF_SECONDS` | 300 | 失败退避起点，指数增长并封顶 |
+| `README_CACHE_TTL_SECONDS` | 300 | Redis v2 响应缓存 TTL |
 
 ### Docker 开发模式
 

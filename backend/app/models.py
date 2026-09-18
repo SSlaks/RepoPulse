@@ -64,8 +64,41 @@ class Repository(Base):
     ranking_items: Mapped[list["RankingItem"]] = relationship(
         back_populates="repository", cascade="all, delete-orphan"
     )
+    readme: Mapped["RepositoryReadme | None"] = relationship(
+        back_populates="repository", cascade="all, delete-orphan", uselist=False
+    )
 
     __table_args__ = (Index("ix_repository_active_language", "archived", "language"),)
+
+
+class RepositoryReadme(Base):
+    __tablename__ = "repository_readmes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repository_id: Mapped[int] = mapped_column(
+        ForeignKey("repositories.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    content: Mapped[str | None] = mapped_column(Text)
+    path: Mapped[str | None] = mapped_column(String(500))
+    html_url: Mapped[str | None] = mapped_column(String(500))
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False)
+    visibility: Mapped[str] = mapped_column(String(20), default="unknown")
+    metadata_etag: Mapped[str | None] = mapped_column(String(500))
+    last_public_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(80))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    readme_etag: Mapped[str | None] = mapped_column(String(500))
+    readme_endpoint: Mapped[str | None] = mapped_column(String(600))
+    root_etag: Mapped[str | None] = mapped_column(String(500))
+    root_entries: Mapped[list[dict] | None] = mapped_column(JSON)
+    root_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    root_selected_path: Mapped[str | None] = mapped_column(String(500))
+
+    repository: Mapped[Repository] = relationship(back_populates="readme")
 
 
 class RepoSnapshot(Base):

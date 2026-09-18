@@ -16,7 +16,7 @@ celery_app = Celery(
     "repopulse",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["worker.app.tasks", "worker.app.avatar_tasks"],
+    include=["worker.app.tasks", "worker.app.avatar_tasks", "worker.app.readme_tasks"],
 )
 celery_app.conf.update(
     task_serializer="json",
@@ -52,6 +52,10 @@ celery_app.conf.update(
         "warmup-top-avatars-daily": {
             "task": "worker.app.avatar_tasks.warmup_avatars",
             "schedule": crontab(minute=30, hour=2),
+        },
+        "refresh-repository-readmes": {
+            "task": "worker.app.readme_tasks.refresh_repository_readmes",
+            "schedule": settings.readme_refresh_interval_seconds,
         },
     },
 )

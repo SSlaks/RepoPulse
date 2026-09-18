@@ -9,9 +9,108 @@ import { generateReadme, listModels, testConnection } from "../src/lib/ai/server
 
 const credentials = { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-test-secret" };
 const originalFetch = globalThis.fetch;
-test.afterEach(() => { globalThis.fetch = originalFetch; });
+const originalLimiterEnvironment = {
+  NODE_ENV: process.env.NODE_ENV,
+  ENVIRONMENT: process.env.ENVIRONMENT,
+  INTERNAL_SERVICE_TOKEN: process.env.INTERNAL_SERVICE_TOKEN,
+};
+test.beforeEach(() => {
+  Reflect.set(process.env, "NODE_ENV", "test");
+  delete process.env.ENVIRONMENT;
+  delete process.env.INTERNAL_SERVICE_TOKEN;
+});
+test.afterEach(() => {
+  globalThis.fetch = originalFetch;
+  for (const [key, value] of Object.entries(originalLimiterEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else Reflect.set(process.env, key, value);
+  }
+});
 function completion(content: string) { return Response.json({ choices: [{ finish_reason: "stop", message: { content } }] }); }
 function request(body: unknown, signal?: AbortSignal) { return new Request("http://localhost/api/ai/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal }); }
+
+async function withProductionBuildEnvironment(environment: string | undefined, run: () => Promise<void>) {
+  const previous = {
+    NODE_ENV: process.env.NODE_ENV,
+    ENVIRONMENT: process.env.ENVIRONMENT,
+    INTERNAL_SERVICE_TOKEN: process.env.INTERNAL_SERVICE_TOKEN,
+  };
+  Reflect.set(process.env, "NODE_ENV", "production");
+  if (environment === undefined) delete process.env.ENVIRONMENT;
+  else process.env.ENVIRONMENT = environment;
+  process.env.INTERNAL_SERVICE_TOKEN = "internal-test-secret";
+  try { await run(); }
+  finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else Reflect.set(process.env, key, value);
+    }
+  }
+}
+
+for (const environment of ["development", "test"]) {
+  test(`production build with ${environment} environment uses coordinator without proxy identity`, async () => {
+    await withProductionBuildEnvironment(environment, async () => {
+      const paths: string[] = [];
+      globalThis.fetch = async (url, options) => {
+        const path = new URL(String(url)).pathname;
+        paths.push(path);
+        if (path === "/internal/limits/acquire") {
+          const headers = new Headers(options?.headers);
+          expect(headers.get("x-internal-service-token")).toBe("internal-test-secret");
+          expect(headers.has("x-repopulse-client-ip")).toBe(false);
+          expect(headers.has("x-repopulse-proxy-token")).toBe(false);
+          expect(JSON.parse(String(options?.body))).toMatchObject({ policy: "ai_probe", kind: "internal" });
+          return Response.json({ lease_id: "test-lease-id-1234567890", expires_at: 9_999_999_999, lease_seconds: 30 });
+        }
+        if (path === "/internal/limits/release") return Response.json({});
+        return completion("OK");
+      };
+      const response = await testConnection(request(credentials));
+      expect(response.status).toBe(200);
+      expect(paths).toEqual(["/internal/limits/acquire", "/chat/completions", "/internal/limits/release"]);
+      expect(await response.text()).not.toContain("internal-test-secret");
+    });
+  });
+}
+
+test("development environment keeps coordinator errors fail closed without leaking secrets", async () => {
+  await withProductionBuildEnvironment("development", async () => {
+    for (const [status, code] of [[429, "RATE_LIMIT"], [503, "LIMITER_UNAVAILABLE"]] as const) {
+      let calls = 0;
+      globalThis.fetch = async (url) => {
+        calls++;
+        expect(new URL(String(url)).pathname).toBe("/internal/limits/acquire");
+        return Response.json({ detail: `internal-test-secret ${credentials.apiKey}` }, { status });
+      };
+      const response = await testConnection(request(credentials));
+      expect(response.status).toBe(status);
+      const body = await response.text();
+      expect(body).toContain(code);
+      expect(body).not.toContain("internal-test-secret");
+      expect(body).not.toContain(credentials.apiKey);
+      expect(calls).toBe(1);
+    }
+  });
+});
+
+for (const environment of ["production", "staging", undefined]) {
+  test(`production build rejects missing proxy identity with ${environment ?? "unset"} environment`, async () => {
+    await withProductionBuildEnvironment(environment, async () => {
+      globalThis.fetch = async () => { throw new Error("coordinator and vendor must not be called"); };
+      const spoofed = request(credentials);
+      spoofed.headers.set("host", "localhost");
+      spoofed.headers.set("forwarded", "for=127.0.0.1;proto=http");
+      spoofed.headers.set("x-forwarded-for", "127.0.0.1");
+      const response = await testConnection(spoofed);
+      expect(response.status).toBe(503);
+      const body = await response.text();
+      expect(body).toContain("IDENTITY_UNAVAILABLE");
+      expect(body).not.toContain("internal-test-secret");
+      expect(body).not.toContain(credentials.apiKey);
+    });
+  });
+}
 
 test("credentials whitelist rejects custom endpoints, models and oversized documents", () => {
   expect(credentialsSchema.safeParse(credentials).success).toBe(true);

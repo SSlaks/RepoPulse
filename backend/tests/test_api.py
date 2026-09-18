@@ -1,5 +1,4 @@
 import pytest
-from app.clients.github import GitHubReadmeData
 from app.main import app
 from fastapi.testclient import TestClient
 
@@ -47,43 +46,3 @@ def test_validation_error_uses_public_error_shape() -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
-
-
-def test_readme_endpoint_returns_decoded_github_content(monkeypatch) -> None:
-    from unittest.mock import AsyncMock
-
-    monkeypatch.setattr("app.services.catalog.limiter.acquire", AsyncMock(return_value=None))
-    monkeypatch.setattr("app.services.catalog.limiter.release", AsyncMock(return_value=True))
-
-    class StubCache:
-        async def get(self, key: str) -> None:
-            return None
-
-        async def set(self, key: str, value: dict, ttl_seconds: int = 300) -> None:
-            return None
-
-    class StubGitHubClient:
-        def readme(self, full_name: str) -> GitHubReadmeData:
-            assert full_name == "test-owner/test-repo"
-            return GitHubReadmeData(
-                repository=full_name,
-                path="README.zh-CN.md",
-                content="# 中文 README",
-                html_url="https://github.com/test-owner/test-repo/blob/main/README.zh-CN.md",
-            )
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr("app.services.catalog.GitHubClient", StubGitHubClient)
-    monkeypatch.setattr("app.services.catalog.response_cache", StubCache())
-    with TestClient(app) as client:
-        response = client.get("/api/v1/repos/test-owner/test-repo/readme")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "repository": "test-owner/test-repo",
-        "path": "README.zh-CN.md",
-        "content": "# 中文 README",
-        "html_url": "https://github.com/test-owner/test-repo/blob/main/README.zh-CN.md",
-    }

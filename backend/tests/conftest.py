@@ -150,6 +150,7 @@ def isolate_external_services(
     monkeypatch.setattr("redis.Redis.execute_command", reject_network)
     monkeypatch.setattr("redis.asyncio.Redis.execute_command", reject_network)
     monkeypatch.setattr("app.services.catalog.response_cache", cache)
+    monkeypatch.setattr("app.services.readme.response_cache", cache)
     monkeypatch.setattr("app.api.routes.system.response_cache", cache)
     monkeypatch.setattr("app.cache.response_cache", cache)
     monkeypatch.setattr("app.task_queue.task_sender.send_task", reject_network)

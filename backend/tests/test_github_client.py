@@ -126,6 +126,182 @@ def test_readme_falls_back_to_default_endpoint() -> None:
     assert readme.content == "# Default README"
 
 
+def test_readme_uses_persisted_validators_after_client_restart() -> None:
+    encoded = base64.b64encode("# 中文 README".encode()).decode()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/contents"):
+            if request.headers.get("if-none-match") == '"root-v1"':
+                return httpx.Response(304, headers={"etag": '"root-v1"'})
+            return httpx.Response(
+                200,
+                headers={"etag": '"root-v1"'},
+                json=[{"name": "README.zh-CN.md", "type": "file"}],
+            )
+        assert request.url.path.endswith("/contents/README.zh-CN.md")
+        if request.headers.get("if-none-match") == '"readme-v1"':
+            return httpx.Response(304, headers={"etag": '"readme-v1"'})
+        return httpx.Response(
+            200,
+            headers={"etag": '"readme-v1"'},
+            json={"path": "README.zh-CN.md", "encoding": "base64", "content": encoded},
+        )
+
+    first_client = GitHubClient(httpx.MockTransport(handler))
+    try:
+        first = first_client.readme_conditional("owner/repo")
+    finally:
+        first_client.close()
+
+    restarted_client = GitHubClient(httpx.MockTransport(handler))
+    try:
+        second = restarted_client.readme_conditional(
+            "owner/repo",
+            root_etag=first.root_etag,
+            root_entries=first.root_entries,
+            readme_etag=first.etag,
+            cached_path=first.path,
+            cached_endpoint=first.readme_endpoint,
+        )
+    finally:
+        restarted_client.close()
+
+    assert first.content == "# 中文 README"
+    assert second.not_modified is True
+    assert second.path == first.path
+    assert second.root_etag == first.root_etag
+    assert second.etag == first.etag
+    assert len(requests) == 4
+    assert requests[2].headers["if-none-match"] == '"root-v1"'
+    assert requests[3].headers["if-none-match"] == '"readme-v1"'
+
+
+def test_new_chinese_readme_path_does_not_reuse_old_file_etag() -> None:
+    encoded = base64.b64encode("# 新中文 README".encode()).decode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/contents"):
+            assert request.headers["if-none-match"] == '"root-v1"'
+            return httpx.Response(
+                200,
+                headers={"etag": '"root-v2"'},
+                json=[
+                    {"name": "README.md", "type": "file"},
+                    {"name": "README.zh-CN.md", "type": "file"},
+                ],
+            )
+        assert request.url.path.endswith("/contents/README.zh-CN.md")
+        assert "if-none-match" not in request.headers
+        return httpx.Response(
+            200,
+            headers={"etag": '"zh-v1"'},
+            json={"path": "README.zh-CN.md", "encoding": "base64", "content": encoded},
+        )
+
+    client = GitHubClient(httpx.MockTransport(handler))
+    try:
+        readme = client.readme_conditional(
+            "owner/repo",
+            root_etag='"root-v1"',
+            root_entries=[{"name": "README.md", "type": "file"}],
+            readme_etag='"english-v1"',
+            cached_path="README.md",
+            cached_endpoint="contents:README.md",
+        )
+    finally:
+        client.close()
+
+    assert readme.path == "README.zh-CN.md"
+    assert readme.content == "# 新中文 README"
+    assert readme.root_etag == '"root-v2"'
+    assert readme.etag == '"zh-v1"'
+
+
+def test_default_readme_validator_remains_bound_to_default_endpoint() -> None:
+    encoded = base64.b64encode(b"# Default README").decode()
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path.endswith("/contents"):
+            if calls == 1:
+                return httpx.Response(200, headers={"etag": '"root-v1"'}, json=[])
+            assert request.headers["if-none-match"] == '"root-v1"'
+            return httpx.Response(304, headers={"etag": '"root-v1"'})
+        assert request.url.path.endswith("/readme")
+        if calls == 2:
+            assert "if-none-match" not in request.headers
+            return httpx.Response(
+                200,
+                headers={"etag": '"default-v1"'},
+                json={"path": "README.md", "encoding": "base64", "content": encoded},
+            )
+        assert request.headers["if-none-match"] == '"default-v1"'
+        return httpx.Response(304, headers={"etag": '"default-v1"'})
+
+    first_client = GitHubClient(httpx.MockTransport(handler))
+    try:
+        first = first_client.readme_conditional("owner/repo")
+    finally:
+        first_client.close()
+    restarted_client = GitHubClient(httpx.MockTransport(handler))
+    try:
+        second = restarted_client.readme_conditional(
+            "owner/repo",
+            root_etag=first.root_etag,
+            root_entries=first.root_entries,
+            readme_etag=first.etag,
+            cached_path=first.path,
+            cached_endpoint=first.readme_endpoint,
+        )
+    finally:
+        restarted_client.close()
+
+    assert calls == 4
+    assert second.not_modified is True
+    assert second.path == "README.md"
+
+
+def test_deleted_chinese_readme_falls_back_without_old_file_validator() -> None:
+    encoded = base64.b64encode(b"# English README").decode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/contents"):
+            assert request.headers["if-none-match"] == '"root-with-zh"'
+            return httpx.Response(
+                200,
+                headers={"etag": '"root-without-zh"'},
+                json=[{"name": "README.md", "type": "file"}],
+            )
+        assert request.url.path.endswith("/readme")
+        assert "if-none-match" not in request.headers
+        return httpx.Response(
+            200,
+            headers={"etag": '"english-v1"'},
+            json={"path": "README.md", "encoding": "base64", "content": encoded},
+        )
+
+    client = GitHubClient(httpx.MockTransport(handler))
+    try:
+        readme = client.readme_conditional(
+            "owner/repo",
+            root_etag='"root-with-zh"',
+            root_entries=[{"name": "README.zh-CN.md", "type": "file"}],
+            readme_etag='"chinese-v1"',
+            cached_path="README.zh-CN.md",
+            cached_endpoint="contents:README.zh-CN.md",
+        )
+    finally:
+        client.close()
+
+    assert readme.not_modified is False
+    assert readme.path == "README.md"
+    assert readme.content == "# English README"
+
+
 def test_readme_raises_for_missing_content() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/contents"):
@@ -150,5 +326,29 @@ def test_converts_rate_limit_responses(status_code: int) -> None:
     try:
         with pytest.raises(GitHubRateLimitError, match="rate limit"):
             client.search("stars:>100")
+    finally:
+        client.close()
+
+
+def test_rate_limit_retry_after_and_reserve_are_observed() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            headers={
+                "retry-after": "37",
+                "x-ratelimit-remaining": "4",
+                "x-ratelimit-reset": "2000000000",
+            },
+            json={"message": "secondary rate limit"},
+        )
+
+    client = GitHubClient(httpx.MockTransport(handler))
+    try:
+        with pytest.raises(GitHubRateLimitError) as error:
+            client.readme("owner/repo")
+        assert error.value.retry_after == 37
+        assert error.value.secondary is True
+        assert client.has_quota(5) is False
+        assert client.has_quota(4) is True
     finally:
         client.close()

@@ -16,6 +16,8 @@ __pycache__/
 .omo/
 repopulse.db
 *.sqlite3
+artifacts/
+backend/*.log
 coverage.xml
 htmlcov/
 playwright-report/

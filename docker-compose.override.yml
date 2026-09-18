@@ -54,6 +54,7 @@ services:
 
   frontend:
     environment:
+      ENVIRONMENT: development
       TRUSTED_PROXY_TOKEN: dev-only-trusted-proxy-token-32-bytes
       INTERNAL_SERVICE_TOKEN: dev-only-internal-service-token-32b
     ports:

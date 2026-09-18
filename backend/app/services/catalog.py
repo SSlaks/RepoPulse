@@ -1,26 +1,10 @@
-import asyncio
-import logging
 from collections import Counter
-from math import ceil
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import response_cache
-from app.clients.github import (
-    GitHubClient,
-    GitHubClientError,
-    GitHubRateLimitError,
-    GitHubReadmeData,
-)
 from app.config import get_settings
-from app.internal.limiter import (
-    LeaseDenied,
-    LimiterUnavailable,
-    limit_failure_response,
-    limiter,
-    limiter_failure_response,
-)
 from app.models import RankingItem, Repository
 from app.repositories.catalog import CatalogRepository
 from app.schemas import (
@@ -37,14 +21,15 @@ from app.schemas import (
     SnapshotResponse,
     SnapshotSeriesResponse,
 )
+from app.services.readme import RepositoryReadmeService
 
 RANGE_DAYS = {"30d": 30, "90d": 90, "365d": 365}
-logger = logging.getLogger(__name__)
 
 
 class CatalogService:
     def __init__(self, session: AsyncSession) -> None:
         self._catalog = CatalogRepository(session)
+        self._readmes = RepositoryReadmeService(session)
 
     async def rankings(
         self,
@@ -115,76 +100,7 @@ class CatalogService:
         *,
         client_identity: str | None = None,
     ) -> ReadmeResponse:
-        full_name = f"{owner}/{name}"
-        cache_key = f"readme:v1:{full_name.lower()}"
-        subject = client_identity or "internal"
-        cached = await response_cache.get(cache_key)
-        if cached:
-            try:
-                await limiter.record("readme", subject)
-            except LeaseDenied as exc:
-                raise limit_failure_response(exc) from exc
-            except LimiterUnavailable:
-                logger.warning("Failed to record cached README limiter request", exc_info=True)
-            return ReadmeResponse.model_validate(cached)
-
-        try:
-            lease = await limiter.acquire("readme", subject)
-        except LeaseDenied as exc:
-            raise limit_failure_response(exc) from exc
-        except LimiterUnavailable as exc:
-            raise limiter_failure_response() from exc
-
-        client: GitHubClient | None = None
-        try:
-            cached = await response_cache.get(cache_key)
-            if cached:
-                return ReadmeResponse.model_validate(cached)
-
-            client = GitHubClient()
-            try:
-                readme = await self._read_github_readme(client, full_name)
-            except GitHubRateLimitError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="GitHub README 暂时无法获取",
-                    headers={
-                        "Cache-Control": "no-store",
-                        "Retry-After": str(ceil(exc.retry_after)),
-                    },
-                ) from exc
-            except GitHubClientError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="README 暂不可用",
-                ) from exc
-        finally:
-            if client is not None:
-                client.close()
-            try:
-                await limiter.release(lease)
-            except LimiterUnavailable:
-                logger.warning("Failed to release README limiter lease", exc_info=True)
-
-        response = ReadmeResponse(
-            repository=readme.repository,
-            path=readme.path,
-            content=readme.content,
-            html_url=readme.html_url,
-        )
-        await response_cache.set(cache_key, response.model_dump(mode="json"), ttl_seconds=3600)
-        return response
-
-    @staticmethod
-    async def _read_github_readme(client: GitHubClient, full_name: str) -> GitHubReadmeData:
-        # asyncio.to_thread cannot be interrupted safely; keep the lease until
-        # the worker thread has completed its network call.
-        task = asyncio.create_task(asyncio.to_thread(client.readme, full_name))
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            await asyncio.shield(task)
-            raise
+        return await self._readmes.get(owner, name, client_identity=client_identity)
 
     async def snapshot_series(
         self, owner: str, name: str, range_name: ChartRange

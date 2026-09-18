@@ -13,10 +13,11 @@ interface RepositoryReadmeProps {
 
 export async function RepositoryReadme({ owner, name }: RepositoryReadmeProps) {
   let readme: ReadmeResponse | null = null;
+  let errorMessage: string | null = null;
   try {
     readme = await fetchReadme(owner, name, copyTrustedProxyHeaders(await headers()));
-  } catch {
-    // Keep the existing empty state when GitHub is unavailable.
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : null;
   }
 
   return (
@@ -33,7 +34,8 @@ export async function RepositoryReadme({ owner, name }: RepositoryReadmeProps) {
         <div className="readme-empty">
           <FileText size={22} />
           <strong>README 暂不可用</strong>
-          <p>GitHub 暂未提供可读取的 README 内容。</p>
+          <p>{errorMessage ?? "README 尚未完成预热或暂时不可用。"}</p>
+          <a href={`/repo/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`}>刷新页面重试</a>
         </div>
       )}
     </section>

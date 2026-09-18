@@ -1,6 +1,21 @@
 import { expect, type Page, test } from "@playwright/test";
 import { AI_STORAGE_KEY } from "../src/lib/ai/storage";
 import { README_SUMMARY_STORE, README_TRANSLATION_DB_NAME, README_TRANSLATION_DB_VERSION, README_TRANSLATION_STORE } from "../src/lib/ai/readme-storage";
+import { setReadmeTestIdentity } from "./readme-test-identity";
+
+test.beforeEach(async ({ page }, testInfo) => {
+  await setReadmeTestIdentity(page, testInfo);
+});
+
+async function openReadmePage(page: Page): Promise<void> {
+  await page.goto("/repo/fastapi/fastapi");
+  await expect(page.getByRole("button", { name: "中文译文" })).toBeEnabled();
+}
+
+async function reloadReadmePage(page: Page): Promise<void> {
+  await page.reload();
+  await expect(page.getByRole("button", { name: "中文译文" })).toBeEnabled();
+}
 
 const saved = { selected: "deepseek", providers: { deepseek: { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-ui-fixture" } } };
 async function configure(page: Page) {
@@ -90,7 +105,7 @@ test("storage failure is visible and never claims configuration was saved", asyn
 test("README guides unconfigured user to settings and returns without an automatic call", async ({ page }) => {
   let calls = 0;
   await page.route("**/api/ai/readme", (route) => { calls++; return route.abort(); });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await page.getByRole("button", { name: "总结翻译" }).click();
   await page.getByRole("link", { name: "前往设置" }).click();
   await page.getByLabel("API Key", { exact: true }).fill("sk-ui-fixture");
@@ -113,7 +128,7 @@ test("README keeps summary independent and translates only after the Chinese tab
     const events = [{ type: "progress", completed: 0, total: body.mode === "summary" ? 1 : 2, message: body.mode === "summary" ? "正在连接模型" : "正在翻译第 1 / 1 段", indeterminate: body.mode === "summary" }, { type: "progress", completed: body.mode === "summary" ? 1 : 2, total: body.mode === "summary" ? 1 : 2, message: body.mode === "summary" ? "项目摘要已生成" : "翻译完成" }, { type: "result", result }];
     await route.fulfill({ contentType: "application/x-ndjson", body: events.map((event) => JSON.stringify(event)).join("\n") + "\n" });
   });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   const original = await page.locator(".readme-content").textContent();
   await page.getByRole("button", { name: "总结翻译" }).click();
   await expect(page.getByRole("region", { name: "AI 摘要" })).toBeVisible();
@@ -151,11 +166,11 @@ test("README translation records survive leaving and re-entering a repository", 
     const events = [{ type: "progress", completed: 0, total: 2, message: "正在翻译第 1 / 1 段" }, { type: "progress", completed: 2, total: 2, message: "翻译完成" }, { type: "result", result: { mode: "translation", translation: "# FastAPI 中文说明\n\n这是持久化译文。" } }];
     await route.fulfill({ contentType: "application/x-ndjson", body: events.map((event) => JSON.stringify(event)).join("\n") + "\n" });
   });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await page.getByRole("button", { name: "中文译文" }).click();
   await expect(page.getByRole("heading", { name: "FastAPI 中文说明" })).toBeVisible();
   await page.goto("/ranking?period=7");
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await expect(page.getByRole("button", { name: "中文译文" })).toBeEnabled();
   await expect(page.getByRole("heading", { name: "FastAPI 中文说明" })).toHaveCount(0);
   await page.getByRole("button", { name: "中文译文" }).click();
@@ -175,12 +190,12 @@ test("README summary records survive leaving and re-entering a repository", asyn
     ];
     await route.fulfill({ contentType: "application/x-ndjson", body: events.map((event) => JSON.stringify(event)).join("\n") + "\n" });
   });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await page.getByRole("button", { name: "总结翻译" }).click();
   await expect(page.getByText("这是持久化摘要。", { exact: true })).toBeVisible();
   await expect(page.getByText("已保存摘要", { exact: false })).toBeVisible();
   await page.goto("/ranking?period=7");
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await expect(page.getByText("这是持久化摘要。", { exact: true })).toBeVisible();
   await expect(page.getByText("已保存摘要", { exact: false })).toBeVisible();
   expect(calls).toBe(1);
@@ -197,7 +212,7 @@ test("README keeps a generated translation in the page when IndexedDB save fails
     const events = [{ type: "progress", completed: 0, total: 2, message: "正在翻译第 1 / 1 段" }, { type: "progress", completed: 2, total: 2, message: "翻译完成" }, { type: "result", result: { mode: "translation", translation: "# FastAPI 中文说明\n\n仅当前页面译文。" } }];
     await route.fulfill({ contentType: "application/x-ndjson", body: events.map((event) => JSON.stringify(event)).join("\n") + "\n" });
   });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await page.getByRole("button", { name: "中文译文" }).click();
   await expect(page.getByRole("heading", { name: "FastAPI 中文说明" })).toBeVisible();
   await expect(page.locator(".ai-readme-storage-warning")).toContainText("保存失败");
@@ -209,7 +224,7 @@ test("README keeps a generated translation in the page when IndexedDB save fails
 });
 
 test("README preserves an old record and warns when the source fingerprint changes", async ({ page }) => {
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await page.evaluate(async ({ databaseName, version, storeName, summaryStoreName }) => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(databaseName, version);
@@ -228,7 +243,7 @@ test("README preserves an old record and warns when the source fingerprint chang
     });
     database.close();
   }, { databaseName: README_TRANSLATION_DB_NAME, version: README_TRANSLATION_DB_VERSION, storeName: README_TRANSLATION_STORE, summaryStoreName: README_SUMMARY_STORE });
-  await page.reload();
+  await reloadReadmePage(page);
   await expect(page.getByRole("status")).toContainText("原文已更新，可重新翻译");
   await page.getByRole("button", { name: "中文译文" }).click();
   await expect(page.getByRole("heading", { name: "旧版译文" })).toBeVisible();
@@ -236,7 +251,7 @@ test("README preserves an old record and warns when the source fingerprint chang
 
 test("README keeps the repository record across model changes and a cancelled retranslation", async ({ page }) => {
   await configure(page);
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await seedTranslationRecord(page, {
     repository: "another/project",
     translation: "# 其他仓库译文",
@@ -253,7 +268,7 @@ test("README keeps the repository record across model changes and a cancelled re
     modelName: "历史模型",
     imageBaseUrl: "https://github.com/fastapi/fastapi/blob/master/README.md",
   });
-  await page.reload();
+  await reloadReadmePage(page);
   await page.getByRole("button", { name: "中文译文" }).click();
   await expect(page.getByRole("heading", { name: "应保留的旧译文" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "其他仓库译文" })).toHaveCount(0);
@@ -278,7 +293,7 @@ test("README keeps the repository record across model changes and a cancelled re
   release?.();
   await expect(page.getByRole("main").getByRole("alert")).toContainText("已取消生成");
   await expect(page.getByRole("heading", { name: "不应采用的新译文" })).toHaveCount(0);
-  await page.reload();
+  await reloadReadmePage(page);
   await page.getByRole("button", { name: "中文译文" }).click();
   await expect(page.getByRole("heading", { name: "应保留的旧译文" })).toBeVisible();
 });
@@ -296,7 +311,7 @@ test("README requires an explicit action and can retranslate in-page when Indexe
       body: `${JSON.stringify({ type: "result", result: { mode: "translation", translation: `# 仅本页译文 ${calls}` } })}\n`,
     });
   });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await expect(page.locator(".ai-readme-storage-error")).toContainText("翻译记录读取失败");
   await page.getByRole("button", { name: "中文译文" }).click();
   expect(calls).toBe(0);
@@ -317,7 +332,7 @@ test("README generation can be cancelled without duplicate requests", async ({ p
     await new Promise<void>((resolve) => { release = resolve; });
     await route.abort().catch(() => undefined);
   });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await page.getByRole("button", { name: "总结翻译" }).click();
   await expect(page.getByRole("button", { name: "生成中" })).toBeDisabled();
   await expect.poll(() => Boolean(release)).toBe(true);
@@ -346,7 +361,7 @@ test("README progress card shows real determinate progress in light and dark the
       return new Response(stream, { headers: { "Content-Type": "application/x-ndjson" } });
     };
   });
-  await page.goto("/repo/fastapi/fastapi");
+  await openReadmePage(page);
   await page.getByRole("button", { name: "中文译文" }).click();
   await expect(page.locator(".ai-readme-progress-card")).toBeVisible();
   const progressbar = page.getByRole("progressbar", { name: "翻译进度" });
