@@ -4,7 +4,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import response_cache
-from app.config import get_settings
 from app.models import RankingItem, Repository
 from app.repositories.catalog import CatalogRepository
 from app.schemas import (
@@ -42,7 +41,6 @@ class CatalogService:
         page: int,
         limit: int,
     ) -> RankingResponse:
-        environment = get_settings().environment
         run = await self._catalog.latest_ranking_run(period)
         if run is None:
             raise HTTPException(
@@ -52,7 +50,7 @@ class CatalogService:
 
         version = (run.collection_summary or {}).get("fingerprint", "legacy")
         cache_key = (
-            f"rankings:v3:{run.id}:{run.published_at}:{version}:{environment}:{period}:"
+            f"rankings:v4:{run.id}:{run.published_at}:{version}:{run.config_version}:{period}:"
             f"{language or '-'}:{topic or '-'}:{min_stars}:{query or '-'}:{page}:{limit}"
         )
         cached = await response_cache.get(cache_key)
@@ -79,9 +77,7 @@ class CatalogService:
                 total=len(filtered),
                 page=page,
                 limit=limit,
-                data_mode="demo"
-                if get_settings().seed_demo_data or environment == "development"
-                else "live",
+                data_mode="demo" if run.config_version == "demo-v1" else "live",
             ),
         )
         await response_cache.set(cache_key, response.model_dump(mode="json"))

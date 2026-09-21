@@ -214,3 +214,68 @@ async def test_api_metadata_is_versioned_and_independent_of_filters(environment,
         assert (await read()).meta.collection is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_live_publication_reports_live_mode_under_demo_settings(environment, monkeypatch):
+    factory, now = environment
+    from app.config import get_settings
+    from app.services.catalog import CatalogService
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    engine = create_async_engine(str(factory.kw["bind"].url).replace("sqlite:", "sqlite+aiosqlite:"))
+    try:
+        # Given: live publication writes a v1 run while development demo settings are active.
+        seed_cohort(factory, now)
+        tasks.publish_daily_rankings(now.isoformat())
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        monkeypatch.setenv("SEED_DEMO_DATA", "true")
+        get_settings.cache_clear()
+        with factory() as session:
+            run = session.scalar(select(RankingRun).where(RankingRun.period_days == 1))
+        assert run is not None
+        assert run.config_version == "v1"
+
+        # When: the rankings endpoint reads the live-published run.
+        async with AsyncSession(engine) as session:
+            response = await CatalogService(session).rankings(
+                period=1, language=None, topic=None, min_stars=0, query=None, page=1, limit=5)
+
+        # Then: provenance follows the run's config_version, not the demo environment flags.
+        assert response.meta.data_mode == "live"
+    finally:
+        get_settings.cache_clear()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_demo_publication_reports_demo_mode_under_live_settings(environment, monkeypatch):
+    factory, now = environment
+    from app.config import get_settings
+    from app.services.catalog import CatalogService
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    engine = create_async_engine(str(factory.kw["bind"].url).replace("sqlite:", "sqlite+aiosqlite:"))
+    try:
+        # Given: a real published run re-marked as demo-seeded via its config_version.
+        seed_cohort(factory, now)
+        tasks.publish_daily_rankings(now.isoformat())
+        with factory() as session:
+            run = session.scalar(select(RankingRun).where(RankingRun.period_days == 1))
+            assert run is not None
+            run.config_version = "demo-v1"
+            session.commit()
+
+        # Given: production-like settings that must not override the run's own provenance.
+        monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setenv("SEED_DEMO_DATA", "false")
+        get_settings.cache_clear()
+
+        # When: the rankings endpoint reads the demo-marked run.
+        async with AsyncSession(engine) as session:
+            response = await CatalogService(session).rankings(
+                period=1, language=None, topic=None, min_stars=0, query=None, page=1, limit=5)
+
+        # Then: the run's config_version alone selects demo provenance.
+        assert response.meta.data_mode == "demo"
+    finally:
+        get_settings.cache_clear()
+        await engine.dispose()
