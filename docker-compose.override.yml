@@ -1,3 +1,9 @@
+# 本机网络若拦截公共 DNS（UDP 53），可为需要访问 GitHub 的服务指定可用解析器。
+x-local-dns: &local-dns
+  dns:
+    - 10.20.55.160
+    - 223.5.5.5
+
 services:
   postgres:
     ports:
@@ -18,6 +24,7 @@ services:
       - ./backend:/app/backend
 
   api:
+    <<: *local-dns
     environment:
       ENVIRONMENT: development
       SEED_DEMO_DATA: "true"
@@ -31,6 +38,7 @@ services:
       - ./backend:/app/backend
 
   worker:
+    <<: *local-dns
     environment:
       ENVIRONMENT: development
       SEED_DEMO_DATA: "true"
