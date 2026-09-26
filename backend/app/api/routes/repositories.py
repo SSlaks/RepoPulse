@@ -48,7 +48,7 @@ async def get_avatar(owner_id: int, background_tasks: BackgroundTasks) -> Respon
         return FileResponse(
             path,
             media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=3600", "ETag": str(path.stat().st_mtime_ns)},
+            headers={"Cache-Control": "public, max-age=604800", "ETag": str(path.stat().st_mtime_ns)},
         )
     async with async_session_factory() as session:
         known = await session.scalar(
