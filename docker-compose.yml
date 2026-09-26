@@ -209,7 +209,7 @@ services:
       - backend
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
-      - /app/.next/cache:rw,noexec,nosuid,size=128m
+      - /app/.next/cache:rw,noexec,nosuid,size=128m,uid=10001,gid=10001,mode=0755
     ports:
       - "127.0.0.1:3000:3000"
     healthcheck:
