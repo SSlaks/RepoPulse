@@ -13,9 +13,10 @@ server {
 }
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
+    # Ubuntu's packaged nginx (1.24) predates the standalone "http2 on" directive,
+    # so enable HTTP/2 through the listen flag for compatibility across versions.
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name ${NEXT_PUBLIC_SITE_HOST};
 
     ssl_certificate /etc/letsencrypt/live/${NEXT_PUBLIC_SITE_HOST}/fullchain.pem;
