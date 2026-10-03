@@ -1,0 +1,38 @@
+name: 功能请求
+description: 提出新功能或对现有行为的改进建议
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > 请先描述清楚问题和使用场景，再谈具体方案。RepoPulse 目前是 0.1.0 开发/预览版本，功能范围可能调整。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题与使用场景
+      description: 你现在遇到什么困难？在什么场景下需要这个能力？谁会受益？
+      placeholder: |
+        例如：我想对比多个仓库在 30 天窗口内的增长趋势，但目前只能逐个打开详情页。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 你希望 RepoPulse 怎么做？可以是交互、接口或数据口径层面的建议
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 其他考虑
+      description: 可选。你尝试过的替代方案、边界条件或对现有功能的影响
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，确认这不是重复请求
+          required: true

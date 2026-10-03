@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 在线演示
+    url: https://repopulse.slak7.cn
+    about: 先访问线上站点，确认问题是否只是本地环境差异
+  - name: 私密报告安全漏洞
+    url: https://github.com/SSlaks/RepoPulse/security/advisories/new
+    about: 安全问题请勿公开提交 Issue，请使用 GitHub 私密漏洞报告
