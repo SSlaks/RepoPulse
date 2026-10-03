@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1280, initial-scale=1" />
+    <title>RepoPulse · GitHub 分享图源</title>
+    <link rel="icon" href="data:," />
+    <!-- 生产字体禁止跨域，静态导出使用同名官方字体；不加载应用脚本或数据接口。 -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&amp;family=Noto+Sans+SC:wght@100..900&amp;display=swap" />
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f4f7fb;
+        --surface: #ffffff;
+        --ink: #172033;
+        --muted: #5f6b7c;
+        --blue: #4f65f5;
+        --green: #11865b;
+        --border: #e2e7ef;
+        --shadow: 0 18px 50px rgba(24, 36, 65, 0.1);
+        --blue-glow: rgba(79, 101, 245, 0.07);
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-6: 24px;
+        --space-9: 36px;
+        --space-10: 40px;
+        --space-12: 48px;
+        --font-display: 64px;
+        --font-brand: 32px;
+        --font-positioning: 24px;
+        --font-body: 20px;
+        --font-caption: 16px;
+        --radius-panel: 16px;
+        --poster-width: 1280px;
+        --poster-height: 640px;
+        --copy-width: 352px;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        width: var(--poster-width);
+        height: var(--poster-height);
+        color: var(--ink);
+        background: var(--canvas);
+        font-family: Inter, "Noto Sans SC", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .poster {
+        width: var(--poster-width);
+        height: var(--poster-height);
+        padding: var(--space-12);
+        background:
+          radial-gradient(ellipse at 85% 45%, var(--blue-glow), transparent 62%),
+          var(--canvas);
+      }
+      .masthead {
+        display: flex;
+        height: var(--space-12);
+        align-items: center;
+        justify-content: space-between;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        font-size: var(--font-brand);
+        font-weight: 760;
+        letter-spacing: -0.02em;
+      }
+      .brand-mark { width: var(--space-12); height: var(--space-12); }
+      .brand-mark rect { fill: var(--blue); }
+      .brand-mark polyline { stroke: var(--surface); }
+      .snapshot-method {
+        margin: 0;
+        color: var(--muted);
+        font-size: var(--font-body);
+        line-height: 1.4;
+      }
+      .content {
+        display: grid;
+        grid-template-columns: var(--copy-width) minmax(0, 1fr);
+        gap: var(--space-12);
+        margin-top: var(--space-9);
+      }
+      .kicker {
+        margin: 0;
+        color: var(--green);
+        font-size: var(--font-body);
+        font-weight: 650;
+        line-height: 1.4;
+      }
+      h1 {
+        margin: var(--space-4) 0 0;
+        font-size: var(--font-display);
+        line-height: 1.12;
+        font-weight: 760;
+        letter-spacing: -0.035em;
+      }
+      h1 span, .positioning span { display: block; white-space: nowrap; }
+      .positioning {
+        margin: var(--space-6) 0 0;
+        color: var(--muted);
+        font-size: var(--font-positioning);
+        line-height: 1.6;
+      }
+      .periods {
+        margin: var(--space-6) 0 0;
+        font-size: var(--font-body);
+        line-height: 1.4;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .demo { margin-top: var(--space-10); }
+      .demo-label {
+        display: block;
+        margin-bottom: var(--space-2);
+        color: var(--muted);
+        font-size: var(--font-caption);
+        line-height: 1.4;
+      }
+      .demo a {
+        color: var(--blue);
+        font-size: var(--font-body);
+        line-height: 1.4;
+        font-weight: 650;
+        text-decoration: none;
+      }
+      .product { min-width: 0; margin: calc(-1 * var(--space-4)) 0 0; }
+      .product-caption {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-4);
+        margin-bottom: var(--space-3);
+        color: var(--muted);
+        font-size: var(--font-caption);
+        line-height: 1.4;
+      }
+      .capture {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-panel);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+      .capture svg { display: block; width: 100%; height: auto; }
+    </style>
+  </head>
+  <body>
+    <main class="poster" aria-label="RepoPulse 产品分享图，1280×640">
+      <header class="masthead">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+            <rect width="64" height="64" rx="14" />
+            <polyline points="54 29.8 45.2 29.8 38.6 49.6 25.4 10 18.8 29.8 10 29.8"
+              fill="none" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>RepoPulse</span>
+        </div>
+        <p class="snapshot-method">每日 UTC 快照 · Star 净增长</p>
+      </header>
+      <section class="content" aria-label="产品介绍与真实榜单">
+        <div class="copy">
+          <p class="kicker">GitHub 开源发现</p>
+          <h1><span>开源项目</span><span>增长榜</span></h1>
+          <p class="positioning"><span>用可解释的数据，</span><span>发现正在增长的开源项目。</span></p>
+          <p class="periods">最近 1 / 7 / 14 / 30 天</p>
+          <div class="demo">
+            <span class="demo-label">在线演示</span>
+            <a href="https://repopulse.slak7.cn">repopulse.slak7.cn</a>
+          </div>
+        </div>
+        <figure class="product">
+          <figcaption class="product-caption">
+            <span>公开站点实拍 · 7 天视图</span>
+            <span>2026-10-03 · 非实时排名</span>
+          </figcaption>
+          <div class="capture">
+            <!-- 真实 home.png 的等比窗口：保留周期、完整性提示、筛选及前四条结果。 -->
+            <svg viewBox="92.4 286 1240 688" role="img" aria-labelledby="capture-title"
+              xmlns="http://www.w3.org/2000/svg">
+              <title id="capture-title">RepoPulse 公开首页真实榜单截图，2026-10-03</title>
+              <image href="home.png" x="0" y="0" width="1440" height="1080" />
+            </svg>
+          </div>
+        </figure>
+      </section>
+    </main>
+  </body>
+</html>
