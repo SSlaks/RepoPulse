@@ -7,7 +7,7 @@
 
 RepoPulse is a Chinese-language growth board for open source GitHub projects. Each day it snapshots the Star counts of tracked candidates and computes net growth over the last 1, 7, 14, and 30 days, with filters, repository details, and trend charts. It is built with Next.js, React, and TypeScript on the frontend, and FastAPI, SQLAlchemy, PostgreSQL, Celery, and Redis on the backend.
 
-**Live demo: <https://repopulse.slak7.cn>** (public live demo)
+**Live website: <https://repopulse.slak7.cn>**
 
 ## Screenshots
 
@@ -22,7 +22,7 @@ RepoPulse is a Chinese-language growth board for open source GitHub projects. Ea
 
 </details>
 
-> Captured from the public demo for illustration only; the images do not promise live snapshot data.
+> Screenshots were captured from the live website and reflect the interface and data at capture time; refer to the website for current rankings.
 
 ## Features
 
