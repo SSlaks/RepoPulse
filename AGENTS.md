@@ -20,9 +20,10 @@
 
 ## 生产部署信息
 
-- 在线站点：https://repopulse.slak7.cn（主域名 slak7.cn 指向同一台服务器）
+- 唯一公开站点：https://repopulse.slak7.cn；Nginx 仅为该主机名提供 RepoPulse，其他 Host 会被拒绝
+- 备用域名 `slak7.cn`、`www.slak7.cn` 不承载 RepoPulse；其 A 记录已于 2026-10-03 清理，不再解析到本机
 - 服务器：腾讯云东京节点 43.153.181.59（AS132203 Tencent Cloud），Ubuntu + Nginx + Let's Encrypt
 - 运行方式：Docker Compose 全栈；frontend 仅绑定 127.0.0.1:3000，由 Nginx 反代至 443
 - 发布/备份/回滚：scripts/repopulse_ops.py（deploy / backup / restore / rollback）
 - 生产环境变量：服务器上的 .env.production（不入库）
-- 以上信息于 2026-09-27 通过 DNS 解析核实；服务器变更时更新本节。
+- 服务器与部署信息于 2026-09-27 核实；服务器或公开域名变更时更新本节。

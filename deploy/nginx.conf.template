@@ -4,6 +4,24 @@
 #
 #   envsubst '${NEXT_PUBLIC_SITE_HOST} ${TRUSTED_PROXY_TOKEN}' \
 #     < deploy/nginx.conf.template > /etc/nginx/conf.d/repopulse.conf
+#
+# NEXT_PUBLIC_SITE_HOST must contain the one DNS host served by RepoPulse
+# (currently repopulse.slak7.cn).
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+    return 444;
+}
 
 server {
     listen 80;

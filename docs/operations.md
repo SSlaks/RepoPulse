@@ -6,6 +6,44 @@
 `INTERNAL_SERVICE_TOKEN` 必须使用相互独立、至少 32 个字符的随机值。开发环境由
 override 文件提供固定的本地 token。
 
+## 公网域名、Nginx 与证书
+
+RepoPulse 只对 `repopulse.slak7.cn` 提供公网服务。`NEXT_PUBLIC_SITE_HOST` 必须只填写这一个
+已解析到生产服务器的 DNS 主机名，不能填写 URL、多个域名或备用域名。Nginx 的 80 端口
+默认 server 对不匹配的 Host 返回 444，443 端口默认 server 使用
+`ssl_reject_handshake on` 拒绝未知 SNI 的 TLS 握手，并对其他 Host 的请求返回 444；仅目标主机名的 HTTP server 会重定向到 HTTPS，
+仅目标主机名的 HTTPS server 会按模板中的代理超时、请求体限制、内部路径隔离和可信代理头
+规则转发到 `127.0.0.1:3000`。`slak7.cn`、`www.slak7.cn` 等备用域名不配置重定向或应用
+server；其 DNS 记录已清理（2026-10-03），不再指向生产服务器。
+
+渲染 `deploy/nginx.conf.template` 时必须保留模板所示的受限变量列表，只替换
+`${NEXT_PUBLIC_SITE_HOST}` 和 `${TRUSTED_PROXY_TOKEN}`，避免 `envsubst` 改写 Nginx 的
+`$host`、`$request_uri`、`$remote_addr` 等运行时变量。渲染结果包含 token，权限应限制为
+仅 Nginx 服务可读，并在 reload 前执行 `nginx -t`。
+
+当前 Let's Encrypt 证书 lineage 为 `repopulse.slak7.cn`，Nginx 使用：
+
+```text
+/etc/letsencrypt/live/repopulse.slak7.cn/fullchain.pem
+/etc/letsencrypt/live/repopulse.slak7.cn/privkey.pem
+```
+
+生产证书由 Certbot `standalone` authenticator 续期。现有
+`/etc/letsencrypt/renewal-hooks/pre/10-stop-nginx` 和
+`/etc/letsencrypt/renewal-hooks/post/90-start-nginx` 会在续期前后停止、启动 Nginx，以释放
+HTTP-01 所需端口；应保留这两个钩子，并用 `certbot renew --dry-run` 检查续期链路和 Nginx
+恢复情况。
+
+更换公开域名时按以下顺序操作，避免配置引用不存在的证书或意外接管备用域名：
+
+1. 先确认新域名的 DNS 已指向生产服务器，并确定它是唯一要服务的 Host。
+2. 使用 standalone 模式为新域名单独签发证书；签发期间按现有停启方式释放端口，并确认
+   `/etc/letsencrypt/live/<新域名>/fullchain.pem` 与 `privkey.pem` 已生成。
+3. 将 `NEXT_PUBLIC_SITE_HOST` 改为新域名，仍使用受限 `envsubst` 列表重新渲染配置；执行
+   `nginx -t` 成功后再 reload，并验证目标域名可用、未知 Host 仍被拒绝。
+4. 确认新域名稳定后，再由用户单独决定旧域名 DNS 和旧证书 lineage 的清理；不要在同一
+   次切换中为旧域名增加猜测性的重定向。
+
 ## 日常备份
 
 备份是 PostgreSQL 16 custom-format 二进制归档，旁边会写入 JSON 元数据。元数据只含
