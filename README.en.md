@@ -9,6 +9,8 @@ RepoPulse is a Chinese-language growth board for open source GitHub projects. Ea
 
 **Live website: <https://repopulse.slak7.cn>**
 
+The current stable release is **v1.0.0**, distributed as source code with Docker Compose for self-hosting. See the [1.0 release notes](docs/releases/v1.0.0.md) for scope and known limitations. `main` may contain work for future releases; use a release tag to run the stable version.
+
 ## Screenshots
 
 ![RepoPulse home ranking](docs/assets/home.png)
@@ -26,32 +28,47 @@ RepoPulse is a Chinese-language growth board for open source GitHub projects. Ea
 
 ## Features
 
-- Daily 1 / 7 / 14 / 30 day Star net-growth rankings
-- Ranking filters, repository details, and trend charts
-- Bring-your-own-API-key AI "summary translation" and full "Chinese translation"
-- Background README warmup with content persisted in PostgreSQL
+- **Discover growing projects**: compare Star net growth and growth rates over the last 1, 7, 14, and 30 days.
+- **Focus on what interests you**: filter by language, topic, and Star count, or search project names and descriptions.
+- **Understand a project's growth**: open repository details to explore historical trends and read its README.
+- **Read projects in Chinese**: configure your own AI API key to generate a README summary or full Chinese translation.
+- **Try locally or self-host**: browse seeded demo data, or configure a GitHub token to collect real data.
 
 ## Quick start
 
-Requires [Docker](https://docs.docker.com/get-docker/) with Compose v2 (check with `docker compose version`). Run from the repository root. Copy the env template once after a fresh clone; if `.env` already exists, keep it and do not overwrite it.
+Requires [Git](https://git-scm.com/downloads), a running [Docker](https://docs.docker.com/get-docker/) engine, and Compose v2 (check with `docker compose version`). These commands start from a fresh clone, pin `v1.0.0`, and copy the env template only if `.env` is missing. For an existing clone, skip the first two lines and run the remaining commands from its root.
 
 **Bash**
 
 ```bash
-cp .env.example .env
-docker compose up -d --build postgres redis api frontend
+git clone --branch v1.0.0 --depth 1 https://github.com/SSlaks/RepoPulse.git
+cd RepoPulse
+[ -f .env ] || cp .env.example .env
+docker compose up -d --build --wait --wait-timeout 180 postgres redis api frontend
 ```
 
 **PowerShell**
 
 ```powershell
-Copy-Item .env.example .env
-docker compose up -d --build postgres redis api frontend
+git clone --branch v1.0.0 --depth 1 https://github.com/SSlaks/RepoPulse.git
+cd RepoPulse
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item -LiteralPath .env.example -Destination .env }
+docker compose up -d --build --wait --wait-timeout 180 postgres redis api frontend
 ```
 
-This is the fastest static demo path. Only the database, cache, API, and frontend start; `api` waits for the one-shot `migrate` service to succeed, then seeds demo data on startup. `migrate` only runs Alembic migrations. Browsing rankings, details, and trends needs no `worker` or `beat`. Run `docker compose up -d worker beat` only when you need live GitHub collection or README warmup.
+This is the fastest static demo path, using included seed data. **No GitHub token or AI API key is needed.** The command builds and starts the database, cache, API, and frontend, then waits for them to be ready. The API seeds demo data after the one-shot migration service succeeds.
 
 Open <http://localhost:3000>, API docs at <http://localhost:8000/docs>.
+
+Check container status:
+
+```bash
+docker compose ps
+```
+
+<http://localhost:8000/api/v1/ready> should return HTTP `200` and `status: ok`. If startup fails, inspect `docker compose logs --tail 100 api frontend migrate`. Stop local services with `docker compose down`, which preserves data volumes.
+
+Browsing demo rankings needs no `worker` or `beat`. To collect real GitHub data, first configure `GITHUB_TOKEN` in `.env`, then run `docker compose up -d worker beat`. For production self-hosting, follow the production configuration in the [getting started guide](docs/getting-started.md). AI summaries and translations separately require your own API key in the browser; charges depend on the selected model provider.
 
 ## Source-only development
 
@@ -91,6 +108,7 @@ Full prerequisites and commands for backend checks, frontend lint / typecheck / 
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
+- [1.0 release notes](docs/releases/v1.0.0.md)
 - [Deployment and operations (maintainer runbook)](docs/operations.md)
 - [Rate limits and leases](docs/rate-limits.md)
 - [Contributing](CONTRIBUTING.md)

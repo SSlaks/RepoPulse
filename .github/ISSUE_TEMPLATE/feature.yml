@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        > 请先描述清楚问题和使用场景，再谈具体方案。RepoPulse 目前是 0.1.0 开发/预览版本，功能范围可能调整。
+        > 请先描述清楚问题和使用场景，再谈具体方案。RepoPulse 当前正式版本为 v1.0.0；涉及现有接口或排名口径的建议，请说明兼容性影响。
   - type: textarea
     id: problem
     attributes:

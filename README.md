@@ -9,6 +9,8 @@ RepoPulse 是一个中文 GitHub 开源项目增长榜。它每天按快照记�
 
 **在线网站：<https://repopulse.slak7.cn>**
 
+当前正式版本为 **v1.0.0**，提供源码与 Docker Compose 自建方式；功能范围和已知限制见 [1.0 发布说明](docs/releases/v1.0.0.md)。`main` 可能包含后续开发中的变更，体验正式版本请使用发布 Tag。
+
 ## 界面
 
 ![RepoPulse 首页榜单](docs/assets/home.png)
@@ -26,32 +28,47 @@ RepoPulse 是一个中文 GitHub 开源项目增长榜。它每天按快照记�
 
 ## 功能
 
-- 每日 1 / 7 / 14 / 30 天 Star 净增长榜
-- 榜单筛选、仓库详情与趋势图
-- 自带 API Key 的 AI「总结翻译」与全文「中文译文」
-- 冷缺 README 后台预热，正文持久化于 PostgreSQL
+- **发现正在增长的项目**：查看最近 1 / 7 / 14 / 30 天的 Star 净增长与增长率。
+- **缩小关注范围**：按语言、主题、Star 数筛选，搜索项目名称或简介。
+- **了解项目增长走势**：打开仓库详情，查看历史趋势与项目 README。
+- **用中文快速读懂项目**：配置自己的 AI API Key，生成 README「总结翻译」或全文「中文译文」。
+- **本地体验或自行部署**：使用演示数据浏览榜单，也可以配置 GitHub Token 开启真实采集。
 
 ## 快速开始
 
-前置条件：[Docker](https://docs.docker.com/get-docker/) 与 Compose v2（用 `docker compose version` 确认）。命令从仓库根目录执行。`.env` 只需在全新克隆后复制一次；如果它已存在，请勿覆盖，直接复用现有配置。
+前置条件：[Git](https://git-scm.com/downloads)、已启动的 [Docker](https://docs.docker.com/get-docker/) 与 Compose v2（用 `docker compose version` 确认）。以下命令从全新克隆开始，固定使用 `v1.0.0`，只在 `.env` 缺失时复制模板。已有克隆请跳过前两行，在仓库根目录执行其余命令。
 
 **Bash**
 
 ```bash
-cp .env.example .env
-docker compose up -d --build postgres redis api frontend
+git clone --branch v1.0.0 --depth 1 https://github.com/SSlaks/RepoPulse.git
+cd RepoPulse
+[ -f .env ] || cp .env.example .env
+docker compose up -d --build --wait --wait-timeout 180 postgres redis api frontend
 ```
 
 **PowerShell**
 
 ```powershell
-Copy-Item .env.example .env
-docker compose up -d --build postgres redis api frontend
+git clone --branch v1.0.0 --depth 1 https://github.com/SSlaks/RepoPulse.git
+cd RepoPulse
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item -LiteralPath .env.example -Destination .env }
+docker compose up -d --build --wait --wait-timeout 180 postgres redis api frontend
 ```
 
-这是最快的静态演示路径：只启动数据库、缓存、API 与前端，`api` 会等待一次性 `migrate` 服务成功后再启动。`migrate` 只执行 Alembic 迁移，演示数据由 API 在启动时写入。浏览榜单、详情与趋势图不需要 `worker` 和 `beat`；只有需要抓取实时 GitHub 数据或预热 README 时，再运行 `docker compose up -d worker beat`。
+这是最快的静态演示路径，使用自带的演示数据，**不需要 GitHub Token 或 AI API Key**。命令构建并启动数据库、缓存、API 与前端，等待服务就绪；`api` 会在一次性迁移服务成功后写入演示数据。
 
 打开站点 <http://localhost:3000>，API 文档见 <http://localhost:8000/docs>。
+
+验证容器状态与 API 就绪情况：
+
+```bash
+docker compose ps
+```
+
+<http://localhost:8000/api/v1/ready> 应返回 HTTP `200` 和 `status: ok`。如果启动失败，用 `docker compose logs --tail 100 api frontend migrate` 查看日志。停止本地服务用 `docker compose down`，会保留数据卷。
+
+浏览演示榜单不需要 `worker` 和 `beat`。真实采集需要先在 `.env` 配置 `GITHUB_TOKEN`，再启动 `docker compose up -d worker beat`；生产自建请按[开发快速上手](docs/getting-started.md)准备生产配置。AI 总结与翻译另需在浏览器里配置自己的 API Key，是否收费取决于所选模型提供方。
 
 ## 纯源码开发
 
@@ -100,6 +117,7 @@ npm test -- --project=desktop-chromium
 ## 文档
 
 - [开发快速上手](docs/getting-started.md)
+- [1.0 发布说明](docs/releases/v1.0.0.md)
 - [生产部署与运维（维护者手册）](docs/operations.md)
 - [访问限流与租约](docs/rate-limits.md)
 - [参与贡献](CONTRIBUTING.md)

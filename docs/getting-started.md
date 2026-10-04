@@ -4,6 +4,7 @@
 
 ## 前置条件
 
+- Git；以下演示命令需要已启动的 Docker 引擎。
 - Docker Compose v2，用 `docker compose version` 确认。旧版 `docker-compose` 二进制不在讨论范围内。
 - 只有源码开发才额外需要 Python 3.12 或更高版本（backend/pyproject.toml 的 `requires-python = ">=3.12"`），以及 Node 22（frontend/Dockerfile 使用 `node:22-alpine`）。
 - 默认开发端口都绑定在本机回环地址：3000 前端、8000 API、5432 PostgreSQL、6379 Redis。被占用时先释放对应进程。
@@ -12,6 +13,15 @@
 
 这条路径用仓库自带的 `docker-compose.yml` 加 `docker-compose.override.yml`。`docker compose` 会自动叠加 override 文件，override 提供演示数据、`ENVIRONMENT=development`，并把端口绑定到 `127.0.0.1`。
 
+### 获取正式版本
+
+全新安装从下面两行开始，Bash 与 PowerShell 均可执行。已有克隆请跳过，在仓库根目录继续操作；贡献者应使用 `main`，见 [参与贡献](../CONTRIBUTING.md)。
+
+```bash
+git clone --branch v1.0.0 --depth 1 https://github.com/SSlaks/RepoPulse.git
+cd RepoPulse
+```
+
 ### 准备环境文件
 
 `.env` 可能已经存在，已有安装不要覆盖。只在缺失时复制模板。
@@ -19,7 +29,7 @@
 PowerShell：
 
 ```powershell
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item -LiteralPath .env.example -Destination .env }
 ```
 
 Bash：
@@ -33,7 +43,7 @@ Bash：
 ### 启动
 
 ```bash
-docker compose up -d --build postgres redis api frontend
+docker compose up -d --build --wait --wait-timeout 180 postgres redis api frontend
 ```
 
 这条命令不包含 `worker` 和 `beat`。静态演示不需要它们，真实采集才需要。`api` 依赖一次性的 `migrate` 服务（执行 `alembic upgrade head`）以及 `postgres`、`redis` 健康检查，Compose 会自动把 `migrate` 带上。
