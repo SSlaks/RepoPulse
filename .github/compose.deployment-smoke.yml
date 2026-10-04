@@ -1,0 +1,49 @@
+# Compose overlay used ONLY by .github/workflows/deployment-smoke.yml.
+#
+# Scope guardrails:
+#   * It never binds application source, never enables --reload, never injects
+#     private DNS, never disables a healthcheck, and never weakens the
+#     hardening inherited from docker-compose.yml (read_only, cap_drop,
+#     no-new-privileges, pids/mem/cpus limits).
+#   * It never changes a service command.
+#   * The only volume added at runtime is the read-only smoke-test driver mount
+#     on the API service; application code stays inside the built image.
+#
+# `!override` replaces the inherited network list instead of merging it.
+# API / migrate / worker / beat therefore lose the non-internal
+# `egress` network and keep only the internal-only `backend` network, which
+# blocks GitHub/AI egress by network topology rather than by an empty token.
+# The frontend deliberately keeps its original `edge` + `backend` networks and
+# receives no AI keys.
+
+services:
+  api:
+    environment:
+      ENVIRONMENT: ${SMOKE_ENVIRONMENT:-production}
+      SEED_DEMO_DATA: ${SMOKE_SEED_DEMO_DATA:-false}
+    networks: !override
+      - backend
+    volumes:
+      # Read-only test driver. The driver is provided by a separate change under
+      # scripts/ and is executed as python /opt/deployment-smoke/test_deployment_smoke.py.
+      - ./scripts:/opt/deployment-smoke:ro
+
+  migrate:
+    environment:
+      ENVIRONMENT: ${SMOKE_ENVIRONMENT:-production}
+      SEED_DEMO_DATA: ${SMOKE_SEED_DEMO_DATA:-false}
+    networks: !override
+      - backend
+
+  worker:
+    networks: !override
+      - backend
+
+  beat:
+    networks: !override
+      - backend
+
+  frontend:
+    environment:
+      ENVIRONMENT: ${SMOKE_ENVIRONMENT:-production}
+      SEED_DEMO_DATA: ${SMOKE_SEED_DEMO_DATA:-false}
