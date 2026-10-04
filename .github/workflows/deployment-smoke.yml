@@ -1,0 +1,271 @@
+name: Deployment Smoke
+
+# Manual-only cloud validation. It builds the exact event SHA once, then runs a
+# fresh demo project and a fresh production project from unique project names.
+# Nothing here touches the production host, GHCR, paid runners, or repository
+# secrets; the read-only smoke driver under scripts/ is provided separately.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Every run gets its own fresh, isolated VM, so two runs cannot collide on the
+  # runner's 127.0.0.1:3000 port. Serializing manual runs instead avoids firing
+  # two identical cloud smoke runs at once (duplicate demand, wasted runner time).
+  group: deployment-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deployment-smoke:
+    name: Cloud deployment smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      # Immutable event SHA for the checkout, build args, and image labels.
+      GIT_SHA: ${{ github.sha }}
+      # Unique per run/attempt so projects, images, and volumes never clash with
+      # a real deployment or a previous run.
+      SMOKE_JOB_PREFIX: repopulse-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+      BACKEND_IMAGE: repopulse-smoke-${{ github.run_id }}-${{ github.run_attempt }}-backend
+      FRONTEND_IMAGE: repopulse-smoke-${{ github.run_id }}-${{ github.run_attempt }}-frontend
+      ARTIFACTS: ${{ github.workspace }}/artifacts/deployment-smoke
+      # The smoke run must never use a real collection token or Sentry DSN.
+      GITHUB_TOKEN: ""
+      SENTRY_DSN: ""
+    steps:
+      - name: Check out the immutable run SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Record baseline toolchain and disk state
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACTS"
+          {
+            echo "# baseline"
+            echo "git_sha=$GIT_SHA"
+            echo "## docker version"
+            docker version
+            echo "## docker compose version"
+            docker compose version
+            echo "## disk before"
+            df -h
+            echo "## memory before"
+            free -m
+          } | tee "$ARTIFACTS/baseline.txt"
+
+      - name: Build backend and frontend images once
+        run: |
+          set -euo pipefail
+          docker compose \
+            -f docker-compose.yml \
+            -f .github/compose.deployment-smoke.yml \
+            --env-file .github/deployment-smoke.env \
+            --project-name "${SMOKE_JOB_PREFIX}-build" \
+            build api frontend
+
+      - name: Verify image revisions match the event SHA
+        run: |
+          set -euo pipefail
+          : > "$ARTIFACTS/images.txt"
+          check_image() {
+            kind="$1"
+            image="$2"
+            revision="$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+            image_id="$(docker image inspect "$image" --format '{{ .Id }}')"
+            printf '%s image=%s revision=%s id=%s\n' "$kind" "$image" "$revision" "$image_id" | tee -a "$ARTIFACTS/images.txt"
+            if [ "$revision" != "$GIT_SHA" ]; then
+              echo "::error::$kind image revision '$revision' does not match event SHA '$GIT_SHA'"
+              exit 1
+            fi
+          }
+          check_image backend "$BACKEND_IMAGE"
+          check_image frontend "$FRONTEND_IMAGE"
+
+      - name: Demo project (fresh seed) smoke
+        run: |
+          set -euo pipefail
+          export SMOKE_ENVIRONMENT=test
+          export SMOKE_SEED_DEMO_DATA=true
+          project="${SMOKE_JOB_PREFIX}-demo"
+          rm -f "$ARTIFACTS/demo.result"
+          compose() {
+            docker compose \
+              -f docker-compose.yml \
+              -f .github/compose.deployment-smoke.yml \
+              --env-file .github/deployment-smoke.env \
+              --project-name "$project" \
+              "$@"
+          }
+          echo "== demo: start postgres + redis and wait for healthy =="
+          compose up --no-build -d --wait --wait-timeout 180 postgres redis
+          echo "== demo: initialize avatar cache volume (must exit 0 before API) =="
+          compose up --no-build --no-deps --exit-code-from avatar-cache-init avatar-cache-init
+          echo "== demo: run main migrations (must exit 0) =="
+          compose up --no-build --no-deps --exit-code-from migrate migrate
+          echo "== demo: start api + frontend and wait for healthy =="
+          compose up --no-build -d --wait --wait-timeout 180 api frontend
+          echo "== demo: run read-only smoke driver =="
+          compose exec -T api python /opt/deployment-smoke/test_deployment_smoke.py --phase demo \
+            | tee "$ARTIFACTS/demo-summary.json"
+          compose logs --no-color --tail 300 > "$ARTIFACTS/demo-logs.txt" 2>&1 || true
+          compose ps --all --format json > "$ARTIFACTS/demo-ps.jsonl" 2>&1 || true
+          printf 'pass\n' > "$ARTIFACTS/demo.result"
+          echo "== demo: teardown own project + volumes =="
+          compose down -v --remove-orphans
+
+      - name: Production project (empty rankings) smoke
+        run: |
+          set -euo pipefail
+          export SMOKE_ENVIRONMENT=production
+          export SMOKE_SEED_DEMO_DATA=false
+          project="${SMOKE_JOB_PREFIX}-production"
+          rm -f "$ARTIFACTS/production.result"
+          compose() {
+            docker compose \
+              -f docker-compose.yml \
+              -f .github/compose.deployment-smoke.yml \
+              --env-file .github/deployment-smoke.env \
+              --project-name "$project" \
+              "$@"
+          }
+          echo "== production: start postgres + redis and wait for healthy =="
+          compose up --no-build -d --wait --wait-timeout 180 postgres redis
+          echo "== production: initialize avatar cache volume (must exit 0 before API) =="
+          compose up --no-build --no-deps --exit-code-from avatar-cache-init avatar-cache-init
+          echo "== production: run main migrations (must exit 0) =="
+          compose up --no-build --no-deps --exit-code-from migrate migrate
+          echo "== production: start api + frontend and wait for healthy =="
+          compose up --no-build -d --wait --wait-timeout 180 api frontend
+          echo "== production: run read-only smoke driver (empty rankings -> 503 expected) =="
+          compose exec -T api python /opt/deployment-smoke/test_deployment_smoke.py --phase production \
+            | tee "$ARTIFACTS/production-summary.json"
+          echo "== production: start worker + beat with their original commands/hardening =="
+          compose up --no-build -d --wait --wait-timeout 180 worker beat
+          echo "== production: explicit celery worker + beat health =="
+          compose exec -T worker python -m worker.app.health worker
+          compose exec -T beat python -m worker.app.health beat
+          echo "== production: avatar cache writable probe (worker, uid 10001) =="
+          compose exec -T worker python -c "
+          import os, tempfile
+          assert os.getuid() == 10001, f'unexpected uid {os.getuid()}'
+          with tempfile.NamedTemporaryFile(dir='/var/cache/repopulse/avatars', prefix='smoke-', delete=True) as handle:
+              handle.write(b'repopulse-smoke')
+              handle.flush()
+              os.fsync(handle.fileno())
+          print(f'worker-avatar-cache-writable-ok uid={os.getuid()}')
+          "
+          echo "== production: api avatar cache read-only probe =="
+          compose exec -T api python -c "
+          import os
+          entries = os.listdir('/var/cache/repopulse/avatars')
+          print(f'api-avatar-cache-readable-ok entries={len(entries)}')
+          "
+          compose logs --no-color --tail 300 > "$ARTIFACTS/production-logs.txt" 2>&1 || true
+          compose ps --all --format json > "$ARTIFACTS/production-ps.jsonl" 2>&1 || true
+          printf 'pass\n' > "$ARTIFACTS/production.result"
+          echo "== production: teardown own project + volumes =="
+          compose down -v --remove-orphans
+
+      - name: Collect diagnostics and clean up
+        if: always()
+        run: |
+          # Keep the shell's default `-e` disabled: diagnostics are best-effort
+          # and a capture failure must not abort cleanup. Cleanup still must not
+          # fake a green run -- if tearing down OUR OWN resources fails, this step
+          # exits nonzero. An earlier step's failure is already recorded on its own
+          # step, so this step never hides it.
+          set +e
+          mkdir -p "$ARTIFACTS"
+          cleanup_failed=0
+
+          {
+            echo "# post-run state"
+            echo "## docker version"
+            docker version
+            echo "## docker compose version"
+            docker compose version
+            echo "## disk after"
+            df -h
+            echo "## memory after"
+            free -m
+            echo "## containers (own namespace)"
+            docker ps -a --filter "name=${SMOKE_JOB_PREFIX}" --format json
+            echo "## images (own namespace)"
+            docker images --filter "reference=${SMOKE_JOB_PREFIX}*" --format json
+          } > "$ARTIFACTS/post-run-state.txt" 2>&1
+
+          case "$SMOKE_JOB_PREFIX" in
+            repopulse-smoke-*) ;;
+            *)
+              echo "::error::unexpected project prefix '$SMOKE_JOB_PREFIX'; refusing to tear down an unknown namespace"
+              exit 1
+              ;;
+          esac
+
+          for suffix in demo production build; do
+            project="${SMOKE_JOB_PREFIX}-${suffix}"
+            compose() {
+              docker compose \
+                -f docker-compose.yml \
+                -f .github/compose.deployment-smoke.yml \
+                --env-file .github/deployment-smoke.env \
+                --project-name "$project" \
+                "$@"
+            }
+            compose logs --no-color --tail 300 > "$ARTIFACTS/${project}-teardown-logs.txt" 2>&1 \
+              || echo "::warning::failed to capture logs for ${project}"
+            compose ps --all --format json > "$ARTIFACTS/${project}-teardown-ps.jsonl" 2>&1 \
+              || echo "::warning::failed to capture ps for ${project}"
+            compose down -v --remove-orphans >> "$ARTIFACTS/${project}-teardown-logs.txt" 2>&1 \
+              || { echo "::error::compose down failed for ${project}"; cleanup_failed=1; }
+          done
+
+          for image in "$BACKEND_IMAGE" "$FRONTEND_IMAGE"; do
+            # A missing image (and its build project) is expected when an early
+            # build step failed, so inspect before removing to avoid a false
+            # cleanup failure. Never force-delete.
+            if docker image inspect "$image" >/dev/null 2>&1; then
+              docker image rm "$image" >> "$ARTIFACTS/post-run-state.txt" 2>&1 \
+                || { echo "::error::failed to remove image ${image}"; cleanup_failed=1; }
+            else
+              echo "image ${image} not present; nothing to remove" >> "$ARTIFACTS/post-run-state.txt"
+            fi
+          done
+
+          exit "$cleanup_failed"
+
+      - name: Upload bounded smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deployment-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ARTIFACTS }}
+          retention-days: 3
+          compression-level: 6
+          if-no-files-found: warn
+
+      - name: Summarize phase results
+        if: always()
+        run: |
+          set +e
+          demo="$(tr -d '\n' < "$ARTIFACTS/demo.result" 2>/dev/null || true)"
+          prod="$(tr -d '\n' < "$ARTIFACTS/production.result" 2>/dev/null || true)"
+          [ -n "$demo" ] || demo="failed/not-reached"
+          [ -n "$prod" ] || prod="failed/not-reached"
+          {
+            echo "## Deployment smoke summary"
+            echo ""
+            echo "| Phase | Result |"
+            echo "| --- | --- |"
+            echo "| demo (fresh seed, 12 repos) | $demo |"
+            echo "| production (empty rankings -> 503) | $prod |"
+            echo ""
+            echo "Bounded logs and ps JSONL are attached as artifact \`deployment-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\` (retention 3 days)."
+            echo "Scheduled collection is intentionally not exercised; worker/beat start offline on the internal-only network."
+          } >> "$GITHUB_STEP_SUMMARY"
