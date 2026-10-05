@@ -40,8 +40,9 @@ export async function fetchRankings(
   return requestJson<RankingResponse>(rankingApiUrl(filters, client), { ...options, revalidate: null });
 }
 
-export async function fetchFilters(): Promise<FilterResponse> {
-  return requestJson<FilterResponse>(`${SERVER_API_BASE}/api/v1/filters`, { revalidate: 3600 });
+export async function fetchFilters(client = false, options: ApiRequestOptions = {}): Promise<FilterResponse> {
+  const base = client ? PUBLIC_API_BASE : SERVER_API_BASE;
+  return requestJson<FilterResponse>(`${base}/api/v1/filters`, { ...options, revalidate: client ? null : 3600 });
 }
 
 // The timeout signal opts out of Next's fetch memoization; share metadata/page reads per render.

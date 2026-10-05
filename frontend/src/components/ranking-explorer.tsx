@@ -10,7 +10,6 @@ import {
   Database,
   Minus,
   Search,
-  SlidersHorizontal,
   Sparkles,
   Star,
   TrendingUp,
@@ -21,6 +20,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { MethodologyOnboarding } from "@/components/methodology-onboarding";
 import { RepositoryAvatar } from "@/components/repository-avatar";
+import { RankingFilterControls } from "@/components/ranking-filters";
 import { fetchRankings } from "@/lib/api";
 import {
   formatCompact,
@@ -31,6 +31,7 @@ import {
   rankMovement,
 } from "@/lib/format";
 import { getRepositoryDescription } from "@/lib/repository-copy";
+import { buildRankingPath, restoreRankingPosition, saveRankingPosition } from "@/lib/ranking-navigation";
 import type { FilterResponse, Period, RankingFilters, RankingItem, RankingResponse } from "@/lib/types";
 
 interface RankingExplorerProps {
@@ -38,17 +39,11 @@ interface RankingExplorerProps {
   filterOptions: FilterResponse;
   initialFilters: RankingFilters;
   initialError?: string;
+  initialFilterError?: string;
   showOnboarding: boolean;
 }
 
 const PERIODS: Period[] = [1, 7, 14, 30];
-const PAGE_SIZE_OPTIONS = [15, 25, 50];
-const MIN_STAR_OPTIONS = [
-  { value: 0, label: "不限 Star" },
-  { value: 100, label: "100+ Star" },
-  { value: 1000, label: "1,000+ Star" },
-  { value: 10000, label: "10,000+ Star" },
-];
 
 type GrowthState = "positive" | "negative" | "zero" | "unavailable";
 
@@ -64,6 +59,7 @@ export function RankingExplorer({
   filterOptions,
   initialFilters,
   initialError,
+  initialFilterError,
   showOnboarding,
 }: RankingExplorerProps) {
   const [data, setData] = useState(initialData);
@@ -71,9 +67,20 @@ export function RankingExplorer({
   const [searchValue, setSearchValue] = useState(initialFilters.q ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(initialError ?? "");
+  const [loadingHeight, setLoadingHeight] = useState(220);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
   const pendingRequest = useRef<AbortController | null>(null);
   const pathname = usePathname();
+  const rankingPath = buildRankingPath(pathname, filters);
+  const canShowData = Boolean(data) && !error && !loading;
+
+  useEffect(() => {
+    if (!canShowData) return;
+    // 等待路由内容布局完成，再恢复同一榜单的位置。
+    const frame = requestAnimationFrame(() => restoreRankingPosition(rankingPath));
+    return () => cancelAnimationFrame(frame);
+  }, [canShowData, rankingPath]);
 
   useEffect(() => () => {
     requestId.current++;
@@ -82,11 +89,13 @@ export function RankingExplorer({
 
   async function applyFilters(changes: Partial<RankingFilters>) {
     const nextFilters = { ...filters, ...changes };
+    if (!loading) setLoadingHeight(Math.ceil(resultsRef.current?.getBoundingClientRect().height || 220));
     const currentRequest = ++requestId.current;
     pendingRequest.current?.abort();
     const controller = new AbortController();
     pendingRequest.current = controller;
     setFilters(nextFilters);
+    if ("q" in changes) setSearchValue(changes.q ?? "");
     setLoading(true);
     setError("");
     syncUrl(nextFilters);
@@ -105,11 +114,6 @@ export function RankingExplorer({
     }
   }
 
-  function handleSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void applyFilters({ q: searchValue.trim() || undefined, page: 1 });
-  }
-
   const baselineItems = data?.data.filter((item) => item.baseline_available) ?? [];
   const leader = baselineItems[0];
   const highestGrowth = baselineItems.length
@@ -119,7 +123,6 @@ export function RankingExplorer({
     ? Math.round(baselineItems.reduce((sum, item) => sum + item.star_delta, 0) / baselineItems.length)
     : null;
   const summaryUnavailable = !data || Boolean(error) || loading || !data?.data.length;
-  const canShowData = Boolean(data) && !error && !loading;
   const leaderLabel = summaryUnavailable
     ? "--"
     : baselineItems.length
@@ -207,55 +210,8 @@ export function RankingExplorer({
             </div>
           </div>
 
-          <div className="filter-bar">
-            <div className="filter-title"><SlidersHorizontal size={16} /> 筛选</div>
-            <select
-              aria-label="编程语言"
-              value={filters.language ?? ""}
-              onChange={(event) => void applyFilters({ language: event.target.value || undefined, page: 1 })}
-            >
-              <option value="">全部语言</option>
-              {filterOptions.languages.map((option) => (
-                <option key={option.value} value={option.value}>{option.label} ({option.count})</option>
-              ))}
-            </select>
-            <select
-              aria-label="项目主题"
-              value={filters.topic ?? ""}
-              onChange={(event) => void applyFilters({ topic: event.target.value || undefined, page: 1 })}
-            >
-              <option value="">全部主题</option>
-              {filterOptions.topics.map((option) => (
-                <option key={option.value} value={option.value}>{option.label} ({option.count})</option>
-              ))}
-            </select>
-            <select
-              aria-label="最低 Star"
-              value={filters.minStars ?? 0}
-              onChange={(event) => void applyFilters({ minStars: Number(event.target.value), page: 1 })}
-            >
-              {MIN_STAR_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <select
-              aria-label="每页数量"
-              value={filters.limit ?? 15}
-              onChange={(event) => void applyFilters({ limit: Number(event.target.value), page: 1 })}
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>每页 {size} 条</option>)}
-            </select>
-            <form className="search-form" onSubmit={handleSearch}>
-              <Search size={16} aria-hidden="true" />
-              <input
-                value={searchValue}
-                onChange={(event) => setSearchValue(event.target.value)}
-                placeholder="搜索仓库或简介"
-                aria-label="搜索仓库或简介"
-              />
-              <button type="submit">搜索</button>
-            </form>
-          </div>
+          <RankingFilterControls filters={filters} initialOptions={filterOptions} initialError={initialFilterError}
+            searchValue={searchValue} onSearchValueChange={setSearchValue} onChange={(changes) => void applyFilters(changes)} />
 
           <div className={`ranking-panel ${loading ? "loading" : ""}`} aria-busy={loading}>
             <div className="panel-heading">
@@ -266,22 +222,18 @@ export function RankingExplorer({
               <span>{canShowData ? `共 ${formatNumber(data?.meta.total ?? 0)} 个结果` : loading ? "正在加载" : "等待数据"}</span>
             </div>
 
-            {error ? <ErrorState message={error} onRetry={() => void applyFilters({})} /> : null}
-            {canShowData && data?.data.length ? (
-              <RankingTable items={data.data} period={filters.period} returnTo={buildRankingPath(pathname, filters)} />
-            ) : null}
-            {!error && !loading && data && !data.data.length ? <EmptyState /> : null}
-            {loading ? <div className="state-block" role="status"><strong>正在加载榜单…</strong></div> : null}
-
-            {canShowData && data && data.meta.total > data.meta.limit ? (
-              <Pagination
-                key={data.meta.page}
-                page={data.meta.page}
-                limit={data.meta.limit}
-                total={data.meta.total}
-                onChange={(page) => void applyFilters({ page })}
-              />
-            ) : null}
+            <div className="ranking-results" ref={resultsRef}>
+              {error ? <ErrorState message={error} onRetry={() => void applyFilters({})} /> : null}
+              {canShowData && data?.data.length ? (
+                <RankingTable items={data.data} period={filters.period} returnTo={rankingPath} />
+              ) : null}
+              {!error && !loading && data && !data.data.length ? <EmptyState /> : null}
+              {loading ? <RankingLoading height={loadingHeight} /> : null}
+              {canShowData && data && data.meta.total > data.meta.limit ? (
+                <Pagination key={data.meta.page} page={data.meta.page} limit={data.meta.limit} total={data.meta.total}
+                  onChange={(page) => void applyFilters({ page })} />
+              ) : null}
+            </div>
             {loading && <div className="loading-line" />}
           </div>
         </div>
@@ -318,7 +270,7 @@ function RankingTable({
                   {formatPercent(item.growth_rate)}
                 </td>
                 <td className="updated">{formatDate(item.last_updated_at)}</td>
-                <td><Link className="row-link" href={repositoryHref(item, returnTo)} aria-label={`查看 ${item.name}`}><ArrowUpRight size={17} /></Link></td>
+                <td><Link className="row-link" href={repositoryHref(item, returnTo)} onNavigate={() => saveRankingPosition(returnTo)} aria-label={`查看 ${item.name}`}><ArrowUpRight size={17} /></Link></td>
               </tr>
             ))}
           </tbody>
@@ -326,7 +278,7 @@ function RankingTable({
       </div>
       <div className="mobile-ranking-list">
         {items.map((item) => (
-          <Link className="mobile-repo" href={repositoryHref(item, returnTo)} key={item.full_name}>
+          <Link className="mobile-repo" href={repositoryHref(item, returnTo)} onNavigate={() => saveRankingPosition(returnTo)} key={item.full_name}>
             <div className="mobile-rank"><RankCell item={item} /></div>
             <RepositoryAvatar owner={item.owner} ownerGithubId={item.owner_github_id} size={42} />
             <div className="mobile-main"><strong>{item.name}</strong><span><LanguageBadge language={item.language} /> · {formatCompact(item.total_stars)} Star</span></div>
@@ -359,7 +311,7 @@ function RepositoryCell({ item, returnTo }: { item: RankingItem; returnTo: strin
     <div className="repo-cell">
       <RepositoryAvatar owner={item.owner} ownerGithubId={item.owner_github_id} size={46} />
       <div>
-        <Link href={repositoryHref(item, returnTo)}>{item.name}</Link>
+        <Link href={repositoryHref(item, returnTo)} onNavigate={() => saveRankingPosition(returnTo)}>{item.name}</Link>
         <p>{getRepositoryDescription(item)}</p>
       </div>
     </div>
@@ -378,6 +330,19 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 
 function EmptyState() {
   return <div className="state-block"><Search size={24} /><strong>没有符合条件的项目</strong><p>调整语言、主题或最低 Star 条件后再试。</p></div>;
+}
+
+function RankingLoading({ height }: { height: number }) {
+  return (
+    <div className="ranking-loading" style={{ height }}>
+      <div className="ranking-skeleton" aria-hidden="true">
+        {Array.from({ length: Math.ceil(height / 84) }, (_, index) => (
+          <div className="skeleton-row" key={index}><i /><span><b /><b /></span><i /></div>
+        ))}
+      </div>
+      <span className="ranking-loading-label" role="status">正在加载榜单…</span>
+    </div>
+  );
 }
 
 function Pagination({ page, limit, total, onChange }: { page: number; limit: number; total: number; onChange: (page: number) => void }) {
@@ -431,18 +396,6 @@ function repositoryHref(item: RankingItem, returnTo: string) {
     pathname: `/repo/${item.owner}/${item.name}`,
     query: { returnTo },
   };
-}
-
-function buildRankingPath(pathname: string, filters: RankingFilters): string {
-  const params = new URLSearchParams();
-  params.set("period", String(filters.period));
-  if (filters.language) params.set("language", filters.language);
-  if (filters.topic) params.set("topic", filters.topic);
-  if (filters.minStars) params.set("minStars", String(filters.minStars));
-  if (filters.q) params.set("q", filters.q);
-  if (filters.limit && filters.limit !== 15) params.set("limit", String(filters.limit));
-  if (filters.page && filters.page > 1) params.set("page", String(filters.page));
-  return `${pathname}?${params}`;
 }
 
 function syncUrl(filters: RankingFilters) {

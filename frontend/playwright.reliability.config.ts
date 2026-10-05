@@ -9,6 +9,7 @@ export default defineConfig({
   timeout: 35_000,
   globalTimeout: 8 * 60_000,
   expect: { timeout: 7_000 },
+  preserveOutput: "always",
   workers: 1,
   retries: 0,
   use: { baseURL: "http://127.0.0.1:13001", trace: "retain-on-failure", reducedMotion: "reduce" },
@@ -20,7 +21,7 @@ export default defineConfig({
       timeout: 15_000,
     },
     {
-      command: "npm start -- --hostname 127.0.0.1 --port 13001",
+      command: "node tests/reliability-next.mjs",
       url: "http://127.0.0.1:13001",
       env: { ...process.env, API_BASE_URL: "http://127.0.0.1:18081", NODE_ENV: "production" },
       reuseExistingServer: false,
@@ -29,8 +30,8 @@ export default defineConfig({
   ],
   projects: [
     { name: "request", testMatch: "api-request.spec.ts" },
-    { name: "reliability-desktop", testMatch: "reliability.spec.ts", use: devices["Desktop Chrome"] },
-    { name: "reliability-mobile", testMatch: "reliability.spec.ts", use: devices["Pixel 7"] },
+    { name: "reliability-desktop", testMatch: ["ranking-ux.spec.ts", "reliability.spec.ts"], use: devices["Desktop Chrome"] },
+    { name: "reliability-mobile", testMatch: ["ranking-ux.spec.ts", "reliability.spec.ts"], use: devices["Pixel 7"] },
     {
       name: "existing-desktop",
       testMatch: ["ranking.spec.ts", "completeness.spec.ts", "markdown.spec.ts"],

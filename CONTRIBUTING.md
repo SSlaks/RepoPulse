@@ -103,7 +103,7 @@ CI 的 `frontend` 任务完整演示了上述环境变量与启动顺序，请�
 
 ### 查询与页面可靠性回归
 
-在 `frontend` 目录先运行 `npm run build`，再运行 `npm run test:reliability`。这组测试会启动独立的本地假 API 和生产模式前端，覆盖请求超时与取消、快速切换、趋势数据边界、详情页 404/503 及重试恢复，不需要数据库、Redis、GitHub Token 或 AI Key。桌面与移动端均会执行；测试结束后由 Playwright 关闭服务。服务端专用用例仅在此独立配置中运行，CI 会单独执行这组回归。
+在 `frontend` 目录先运行 `npm run build`，再运行 `npm run test:reliability`。这组测试会启动独立的本地假 API 和生产模式前端，覆盖请求超时与取消、快速切换、筛选选项重试、条件移除与清空、加载区高度、详情返回位置、趋势数据边界、详情页 404/503 及重试恢复，不需要数据库、Redis、GitHub Token 或 AI Key。桌面与移动端均会执行；测试结束后由 Playwright 关闭服务。服务端专用用例仅在此独立配置中运行，CI 会单独执行这组回归。
 
 ## 提交改动
 

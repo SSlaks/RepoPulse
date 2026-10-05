@@ -22,6 +22,9 @@ export async function RankingPage({ searchParams }: { searchParams: Promise<Sear
       initialData={rankingResult.status === "fulfilled" ? rankingResult.value : null}
       filterOptions={filterResult.status === "fulfilled" ? filterResult.value : EMPTY_FILTERS}
       initialFilters={filters}
+      initialFilterError={filterResult.status === "rejected"
+        ? filterResult.reason instanceof Error ? filterResult.reason.message : "筛选选项暂时不可用，请重试。"
+        : undefined}
       showOnboarding={!cookieStore.has(METHODOLOGY_COOKIE)}
       initialError={
         rankingResult.status === "rejected"

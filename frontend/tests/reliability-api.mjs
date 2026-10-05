@@ -4,6 +4,30 @@ const rules = new Map();
 const counts = new Map();
 const stamp = "2026-09-30T00:00:00Z";
 
+function selectedRule(request, rule) {
+  if (!rule?.browser || request.headers["x-reliability-browser"] !== "1") return rule;
+  return { ...rule, ...rule.browser, browser: undefined };
+}
+
+function rankingPayload(url, { prefix = "ranking", count = 15, total = 45 } = {}) {
+  const period = Number(url.searchParams.get("period") ?? 7);
+  const page = Number(url.searchParams.get("page") ?? 1);
+  const limit = Number(url.searchParams.get("limit") ?? 15);
+  const firstRank = (page - 1) * limit + 1;
+  return {
+    data: Array.from({ length: count }, (_, index) => ({
+      rank: firstRank + index, previous_rank: firstRank + index,
+      full_name: `fixture/${prefix}-p${period}-${page}-${index + 1}`, owner: "fixture", owner_github_id: null,
+      name: `${prefix}-p${period}-${page}-${index + 1}`, description: "排名页体验回归测试", language: "TypeScript",
+      topics: ["testing"], total_stars: 10_000 - index, star_delta: 100 - index, growth_rate: 0.1,
+      baseline_available: true, last_updated_at: stamp,
+      github_url: `https://github.com/fixture/${prefix}-p${period}-${page}-${index + 1}`,
+    })),
+    meta: { period_days: period, as_of: stamp, baseline_at: stamp, generated_at: stamp, coverage: count,
+      total, page, limit, data_mode: "live" },
+  };
+}
+
 function defaultPayload(url) {
   if (url.pathname === "/api/v1/filters") return { languages: [], topics: [] };
   if (url.pathname === "/api/v1/rankings") {
@@ -49,10 +73,11 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/__counts") return json(response, 200, Object.fromEntries(counts));
   counts.set(url.pathname, (counts.get(url.pathname) ?? 0) + 1);
-  const rule = rules.get(url.pathname);
+  const rule = selectedRule(request, rules.get(url.pathname));
   if (rule?.disconnect) return request.socket.destroy();
   if (rule?.delayMs) await new Promise((resolve) => setTimeout(resolve, rule.delayMs));
-  json(response, rule?.status ?? 200, rule?.body ?? defaultPayload(url));
+  const defaultStatus = url.pathname === "/api/v1/filters" ? 503 : 200;
+  json(response, rule?.status ?? defaultStatus, rule?.ranking ? rankingPayload(url, rule.ranking) : rule?.body ?? defaultPayload(url));
 });
 
 server.listen(18081, "127.0.0.1");
