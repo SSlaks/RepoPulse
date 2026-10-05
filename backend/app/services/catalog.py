@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 
 from fastapi import HTTPException, status
@@ -49,9 +50,15 @@ class CatalogService:
             )
 
         version = (run.collection_summary or {}).get("fingerprint", "legacy")
+        # 结构化编码保留空值和字面量，避免占位符与分隔符碰撞。
+        parameters = json.dumps(
+            [language, topic, min_stars, query, page, limit],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         cache_key = (
-            f"rankings:v4:{run.id}:{run.published_at}:{version}:{run.config_version}:{period}:"
-            f"{language or '-'}:{topic or '-'}:{min_stars}:{query or '-'}:{page}:{limit}"
+            f"rankings:v5:{run.id}:{run.published_at}:{version}:{run.config_version}:{period}:"
+            f"{parameters}"
         )
         cached = await response_cache.get(cache_key)
         if cached:
@@ -61,7 +68,7 @@ class CatalogService:
         filtered = [
             self._to_ranking_item(item, repository)
             for item, repository in rows
-            if self._matches(repository, language, topic, min_stars, query)
+            if self._matches(item, repository, language, topic, min_stars, query)
         ]
         offset = (page - 1) * limit
         response = RankingResponse(
@@ -135,6 +142,7 @@ class CatalogService:
 
     @staticmethod
     def _matches(
+        ranking_item: RankingItem,
         repository: Repository,
         language: str | None,
         topic: str | None,
@@ -146,7 +154,8 @@ class CatalogService:
             return False
         if topic and topic.lower() not in [item.lower() for item in repository.topics]:
             return False
-        if repository.stars_count < min_stars:
+        # 仓库资料可能先于新榜单更新，筛选必须与已发布榜单的展示值一致。
+        if ranking_item.end_stars < min_stars:
             return False
         if query:
             haystack = f"{repository.full_name} {repository.description or ''}"
