@@ -17,11 +17,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { MethodologyOnboarding } from "@/components/methodology-onboarding";
 import { RepositoryAvatar } from "@/components/repository-avatar";
-import { rankingApiUrl } from "@/lib/api";
+import { fetchRankings } from "@/lib/api";
 import {
   formatCompact,
   formatDate,
@@ -72,28 +72,36 @@ export function RankingExplorer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(initialError ?? "");
   const requestId = useRef(0);
+  const pendingRequest = useRef<AbortController | null>(null);
   const pathname = usePathname();
+
+  useEffect(() => () => {
+    requestId.current++;
+    pendingRequest.current?.abort();
+  }, []);
 
   async function applyFilters(changes: Partial<RankingFilters>) {
     const nextFilters = { ...filters, ...changes };
     const currentRequest = ++requestId.current;
+    pendingRequest.current?.abort();
+    const controller = new AbortController();
+    pendingRequest.current = controller;
     setFilters(nextFilters);
     setLoading(true);
     setError("");
     syncUrl(nextFilters);
     try {
-      const response = await fetch(rankingApiUrl(nextFilters, true));
-      const payload = (await response.json()) as RankingResponse | { error?: { message?: string } };
-      if (!response.ok) {
-        throw new Error("error" in payload ? payload.error?.message : "榜单加载失败");
-      }
-      if (currentRequest === requestId.current) setData(payload as RankingResponse);
+      const payload = await fetchRankings(nextFilters, true, { signal: controller.signal });
+      if (currentRequest === requestId.current) setData(payload);
     } catch (requestError) {
-      if (currentRequest === requestId.current) {
+      if (currentRequest === requestId.current && !controller.signal.aborted) {
         setError(requestError instanceof Error ? requestError.message : "榜单加载失败");
       }
     } finally {
-      if (currentRequest === requestId.current) setLoading(false);
+      if (currentRequest === requestId.current) {
+        pendingRequest.current = null;
+        setLoading(false);
+      }
     }
   }
 
@@ -111,6 +119,7 @@ export function RankingExplorer({
     ? Math.round(baselineItems.reduce((sum, item) => sum + item.star_delta, 0) / baselineItems.length)
     : null;
   const summaryUnavailable = !data || Boolean(error) || loading || !data?.data.length;
+  const canShowData = Boolean(data) && !error && !loading;
   const leaderLabel = summaryUnavailable
     ? "--"
     : baselineItems.length
@@ -136,9 +145,9 @@ export function RankingExplorer({
             <Clock3 size={17} />
             <div>
               <span>数据截止</span>
-              <strong>{data ? formatDate(data.meta.as_of, true) : "等待数据"}</strong>
+              <strong>{loading ? "正在加载" : canShowData && data ? formatDate(data.meta.as_of, true) : "等待数据"}</strong>
             </div>
-            {data?.meta.data_mode === "demo" && <span className="demo-badge">演示数据</span>}
+            {canShowData && data?.meta.data_mode === "demo" && <span className="demo-badge">演示数据</span>}
           </div>
         </div>
       </section>
@@ -162,9 +171,9 @@ export function RankingExplorer({
             <div className="coverage-status">
             <p className="coverage-copy">
               <Database size={15} />
-              当前覆盖 <strong>{formatNumber(data?.meta.coverage ?? 0)}</strong> 个候选仓库
+              当前覆盖 <strong>{canShowData ? formatNumber(data?.meta.coverage ?? 0) : "--"}</strong> 个候选仓库
             </p>
-            {data?.meta.collection && (
+            {canShowData && data?.meta.collection && (
               <p className={`collection-completeness${data.meta.collection.is_partial ? " is-partial" : ""}`} role="status">
                 已更新 {formatNumber(data.meta.collection.succeeded)} / {formatNumber(data.meta.collection.expected)} 个仓库
                 {data.meta.collection.is_partial && `，${formatNumber(data.meta.collection.missing)} 个暂不可用`}
@@ -254,16 +263,17 @@ export function RankingExplorer({
                 <h2>{filters.period} 天增长排行</h2>
                 <p>按周期内 Star 净增长降序排列</p>
               </div>
-              <span>共 {formatNumber(data?.meta.total ?? 0)} 个结果</span>
+              <span>{canShowData ? `共 ${formatNumber(data?.meta.total ?? 0)} 个结果` : loading ? "正在加载" : "等待数据"}</span>
             </div>
 
             {error ? <ErrorState message={error} onRetry={() => void applyFilters({})} /> : null}
-            {!error && data?.data.length ? (
+            {canShowData && data?.data.length ? (
               <RankingTable items={data.data} period={filters.period} returnTo={buildRankingPath(pathname, filters)} />
             ) : null}
-            {!error && !data?.data.length ? <EmptyState /> : null}
+            {!error && !loading && data && !data.data.length ? <EmptyState /> : null}
+            {loading ? <div className="state-block" role="status"><strong>正在加载榜单…</strong></div> : null}
 
-            {data && data.meta.total > data.meta.limit ? (
+            {canShowData && data && data.meta.total > data.meta.limit ? (
               <Pagination
                 key={data.meta.page}
                 page={data.meta.page}

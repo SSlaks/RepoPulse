@@ -87,6 +87,8 @@ jobs:
           python ../scripts/test_seed_e2e_cache.py
       - name: Run production-mode browser tests
         run: npm test
+      - name: Run isolated frontend reliability tests
+        run: npm run test:reliability
 
   infrastructure-integration:
     runs-on: ubuntu-latest

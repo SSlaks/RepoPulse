@@ -1141,11 +1141,32 @@ html[data-theme="dark"] .theme-toggle-glow {
   box-shadow: var(--shadow);
 }
 
-.chart-tool.loading::after {
-  position: absolute;
-  inset: 0;
-  content: "";
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
+.chart-state {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.chart-state strong {
+  color: var(--ink);
+}
+
+.chart-state p {
+  margin: 0;
+}
+
+.chart-state button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 14px;
 }
 
 .chart-heading {
@@ -1173,6 +1194,14 @@ html[data-theme="dark"] .theme-toggle-glow {
 .chart-heading strong {
   color: var(--green);
   font-size: 22px;
+}
+
+.chart-heading strong.negative {
+  color: var(--danger);
+}
+
+.chart-heading strong.neutral {
+  color: var(--muted);
 }
 
 .chart-heading small {

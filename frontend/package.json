@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "generate:api": "openapi-typescript http://localhost:8000/openapi.json -o src/lib/openapi.d.ts",
     "test": "playwright test",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:reliability": "playwright test --config=playwright.reliability.config.ts"
   },
   "dependencies": {
     "lucide-react": "^0.541.0",

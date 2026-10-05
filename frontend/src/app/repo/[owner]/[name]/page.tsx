@@ -18,6 +18,7 @@ import { RepositoryAvatar } from "@/components/repository-avatar";
 import { RepositoryReadme, RepositoryReadmeFallback } from "@/components/repository-readme";
 import { StarChart } from "@/components/star-chart";
 import { fetchRepository, fetchSnapshots } from "@/lib/api";
+import { ApiError } from "@/lib/api-request";
 import { formatDate, formatNumber } from "@/lib/format";
 import { serializeJsonLd } from "@/lib/json-ld";
 import { getRepositoryDescription } from "@/lib/repository-copy";
@@ -57,11 +58,17 @@ export default async function RepositoryPage({ params, searchParams }: Repositor
     fetchRepository(owner, name),
     fetchSnapshots(owner, name, "90d"),
   ]);
-  if (repositoryResult.status === "rejected") notFound();
+  if (repositoryResult.status === "rejected") {
+    if (repositoryResult.reason instanceof ApiError && repositoryResult.reason.status === 404) notFound();
+    throw repositoryResult.reason;
+  }
 
   const repository = repositoryResult.value;
   const description = getRepositoryDescription(repository);
   const snapshots = snapshotResult.status === "fulfilled" ? snapshotResult.value.data : [];
+  const snapshotError = snapshotResult.status === "rejected"
+    ? snapshotResult.reason instanceof Error ? snapshotResult.reason.message : "趋势数据暂时不可用，请重试。"
+    : undefined;
   const schema = {
     "@context": "https://schema.org",
     "@type": "SoftwareSourceCode",
@@ -113,7 +120,7 @@ export default async function RepositoryPage({ params, searchParams }: Repositor
           <Metric icon={<Code2 size={18} />} label="主要语言" value={repository.language ?? "未知"} />
         </div>
 
-        <StarChart owner={owner} name={name} initialData={snapshots} />
+        <StarChart key={`${owner}/${name}`} owner={owner} name={name} initialData={snapshots} initialError={snapshotError} />
 
         <Suspense fallback={<RepositoryReadmeFallback />}>
           <RepositoryReadme owner={owner} name={name} />

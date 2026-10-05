@@ -9,6 +9,11 @@
 - 指定模型不可用时明确报告，不静默替换模型。
 - 完成后汇总实现内容、测试结果及尚未验证的事项。
 
+## Git 提交规范
+
+- Git 提交信息的标题和正文使用简体中文；技术名称、文件路径及 `feat`、`fix`、`docs` 等类型前缀可保留英文。
+- 标题简要说明本次变更，正文按需记录实现内容与验证结果。
+
 ## Long-running collection tasks
 
 - After starting a long-running collection, build, sync, or migration task, report only startup, meaningful milestone progress, completion, or failure.

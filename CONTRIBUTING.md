@@ -101,6 +101,10 @@ npm test -- --project=mobile-chromium
 
 CI 的 `frontend` 任务完整演示了上述环境变量与启动顺序，请以 [.github/workflows/ci.yml](.github/workflows/ci.yml) 为准，不要脱离前置条件单独解读 `npm test`。
 
+### 查询与页面可靠性回归
+
+在 `frontend` 目录先运行 `npm run build`，再运行 `npm run test:reliability`。这组测试会启动独立的本地假 API 和生产模式前端，覆盖请求超时与取消、快速切换、趋势数据边界、详情页 404/503 及重试恢复，不需要数据库、Redis、GitHub Token 或 AI Key。桌面与移动端均会执行；测试结束后由 Playwright 关闭服务。服务端专用用例仅在此独立配置中运行，CI 会单独执行这组回归。
+
 ## 提交改动
 
 - **保持小步、聚焦。** 一个 Pull Request 只解决一件事，便于审查和回滚。大改动请先开 Issue 说明背景。
