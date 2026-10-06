@@ -37,7 +37,7 @@ jobs:
       SENTRY_DSN: ""
     steps:
       - name: Check out the immutable run SHA
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
