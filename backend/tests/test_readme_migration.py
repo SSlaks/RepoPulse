@@ -6,9 +6,8 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from app.config import get_settings
-from app.models import Base, Repository
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import Session
+from app.models import Base
+from sqlalchemy import MetaData, Table, create_engine, inspect, text
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PRE_README_REVISION = "f6a7b8c9d0e1"
@@ -40,6 +39,11 @@ def test_empty_database_migrates_readme_storage(
             assert {"content", "is_private", "visibility", "readme_etag", "root_etag"} <= readme_columns
             repository_columns = {column["name"] for column in inspect(engine).get_columns("repositories")}
             assert "is_private" not in repository_columns
+            assert {
+                "language_lower",
+                "topics_lower_keys",
+                "search_text_lower",
+            } <= repository_columns
             with engine.connect() as connection:
                 version = connection.scalar(text("SELECT version_num FROM alembic_version"))
             assert version == ScriptDirectory.from_config(config).get_current_head()
@@ -60,22 +64,32 @@ def test_readme_migration_preserves_existing_rows(
         engine = create_engine(f"sqlite:///{database_path.as_posix()}")
         try:
             timestamp = datetime(2026, 9, 16, tzinfo=UTC)
-            with Session(engine) as session:
-                session.add(
-                    Repository(
+            # The historical revision predates the ORM's normalized search
+            # columns, so seed the old table through reflected Core metadata
+            # instead of the current ORM model.
+            repositories = Table(
+                "repositories", MetaData(), autoload_with=engine
+            )
+            with engine.begin() as connection:
+                connection.execute(
+                    repositories.insert().values(
                         github_id=123,
                         full_name="owner/retained",
                         owner="owner",
                         name="retained",
                         html_url="https://github.com/owner/retained",
                         topics=[],
+                        stars_count=0,
+                        forks_count=0,
+                        open_issues_count=0,
+                        is_fork=False,
+                        archived=False,
+                        disabled=False,
                         first_tracked_at=timestamp,
                         last_seen_at=timestamp,
                         history_available_from=timestamp,
                     )
                 )
-                session.commit()
-            with engine.begin() as connection:
                 connection.execute(
                     text(
                         "INSERT INTO job_runs "

@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 
 from sqlalchemy import (
@@ -14,8 +15,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import DeclarativeBase, Mapped, Mapper, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -35,7 +38,10 @@ class Repository(Base):
     description: Mapped[str | None] = mapped_column(Text)
     html_url: Mapped[str] = mapped_column(String(500))
     language: Mapped[str | None] = mapped_column(String(80), index=True)
+    language_lower: Mapped[str] = mapped_column(Text)
     topics: Mapped[list[str]] = mapped_column(JSON, default=list)
+    topics_lower_keys: Mapped[list[str]] = mapped_column(JSON, default=list)
+    search_text_lower: Mapped[str] = mapped_column(Text)
     license_name: Mapped[str | None] = mapped_column(String(120))
     stars_count: Mapped[int] = mapped_column(Integer, default=0)
     forks_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -215,3 +221,27 @@ class SnapshotRequest(Base):
     __table_args__ = (
         UniqueConstraint("job_run_id", "repository_id", name="uq_snapshot_request_repo"),
     )
+
+
+def _refresh_normalized_search_fields(repository: Repository) -> None:
+    """Derive the persisted filter fields using Python's exact lower() semantics.
+
+    The migration froze the same rules so stored values never depend on the
+    database locale; do not introduce casefold, strip, or Unicode normalization.
+    """
+    language = repository.language
+    repository.language_lower = (language or "").lower()
+    repository.topics_lower_keys = [
+        json.dumps(topic.lower(), ensure_ascii=True) for topic in (repository.topics or [])
+    ]
+    repository.search_text_lower = (
+        f"{repository.full_name} {repository.description or ''}".lower()
+    )
+
+
+@event.listens_for(Repository, "before_insert")
+@event.listens_for(Repository, "before_update")
+def _populate_normalized_search_fields(
+    _mapper: Mapper[Repository], _connection: Connection, repository: Repository
+) -> None:
+    _refresh_normalized_search_fields(repository)
