@@ -4,7 +4,7 @@
 #   "anyio>=4.0,<5.0",
 #   "httpx>=0.27,<1.0",
 #   "psycopg[binary]>=3.2,<4.0",
-#   "sqlalchemy[asyncio]>=2.0,<3.0",
+#   "sqlalchemy[asyncio]>=2.0,<2.1",
 #   "uvicorn[standard]>=0.30,<1.0",
 # ]
 # ///

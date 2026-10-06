@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["psycopg[binary]>=3.2,<4.0", "pydantic-settings>=2.5,<3.0", "redis>=5.0,<6.0", "sqlalchemy[asyncio]>=2.0,<3.0"]
+# dependencies = ["psycopg[binary]>=3.2,<4.0", "pydantic-settings>=2.5,<3.0", "redis>=5.0,<6.0", "sqlalchemy[asyncio]>=2.0,<2.1"]
 # ///
 """一次性 UUID 库上的榜单查询离线性能与 EXPLAIN 驱动；执行、审计与门禁评审由 Sol 负责。"""
 from __future__ import annotations
