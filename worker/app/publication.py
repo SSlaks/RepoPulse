@@ -8,6 +8,8 @@ from app.models import JobRun, RankingItem, RankingRun, RepoSnapshot, SnapshotRe
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from worker.app.rankings import load_repository_series
+
 
 @dataclass(frozen=True)
 class PublicationCandidate:
@@ -123,7 +125,8 @@ def _replace_batch(session: Session, tasks, as_of: datetime, result: Publication
         RankingRun.as_of == as_of, RankingRun.period_days.in_((1, 7, 14, 30)))))
     session.execute(delete(RankingItem).where(RankingItem.ranking_run_id.in_(old_ids)))
     session.execute(delete(RankingRun).where(RankingRun.id.in_(old_ids)))
-    count = sum(tasks._persist_ranking(session, period, as_of, result.repository_ids)
+    series = load_repository_series(session, as_of, result.repository_ids)
+    count = sum(tasks._persist_ranking(session, period, as_of, series)
                 for period in (1, 7, 14, 30))
     if count != len(result.repository_ids) * 4:
         raise ValueError("Ranking batch does not match the published repository cohort")

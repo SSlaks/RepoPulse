@@ -11,19 +11,18 @@ from app.database import get_sync_session
 from app.models import (
     DiscoveryRun,
     JobRun,
-    RankingItem,
-    RankingRun,
     Repository,
-    RepoSnapshot,
 )
-from app.ranking.calculator import RepositorySeries, SnapshotPoint, calculate_ranking
+from app.ranking.calculator import RepositorySeries
 from celery import Task
 from redis import Redis
 from redis.exceptions import LockError, RedisError
 from sqlalchemy import delete, select
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import Session
 
 from worker.app.celery_app import celery_app
+from worker.app.rankings import persist_period
 from worker.app.snapshots import (
     SnapshotCancelled,
     SnapshotCollector,
@@ -362,88 +361,14 @@ def _wait_for_quota(job_key: str, error: GitHubRateLimitError) -> None:
             session.commit()
 
 
-def _persist_ranking(session, period_days: int, as_of: datetime,
-                     repository_ids: list[int] | None = None) -> int:
-    query = select(Repository)
-    if repository_ids is not None:
-        query = query.where(Repository.id.in_(repository_ids))
-    else:
-        query = query.where(
-            Repository.is_fork.is_(False),
-            Repository.archived.is_(False),
-            Repository.disabled.is_(False),
-            Repository.availability_status != "quarantined",
-        )
-    repositories = session.scalars(query).all()
-    series = []
-    for repository in repositories:
-        snapshots = session.scalars(
-            select(RepoSnapshot)
-            .where(
-                RepoSnapshot.repository_id == repository.id,
-                RepoSnapshot.snapshot_date <= as_of.date(),
-                RepoSnapshot.source == "github_api",
-            )
-            .order_by(RepoSnapshot.captured_at)
-        ).all()
-        if not any(snapshot.snapshot_date == as_of.date() for snapshot in snapshots):
-            continue
-        series.append(
-                RepositorySeries(
-                    repository_id=repository.id,
-                    full_name=repository.full_name,
-                snapshots=tuple(
-                    SnapshotPoint(datetime.combine(snapshot.snapshot_date, as_of.timetz()),
-                                  snapshot.stars_count)
-                        for snapshot in snapshots
-                    ),
-                    current_stars=None,
-                )
-        )
-    results = calculate_ranking(series, period_days, as_of)
-    previous_run = session.scalar(
-        select(RankingRun)
-        .where(RankingRun.period_days == period_days, RankingRun.as_of < as_of)
-        .order_by(RankingRun.as_of.desc())
-        .limit(1)
-    )
-    previous_ranks = (
-        dict(
-            session.execute(
-                select(RankingItem.repository_id, RankingItem.rank).where(
-                    RankingItem.ranking_run_id == previous_run.id
-                )
-            ).all()
-        )
-        if previous_run
-        else {}
-    )
-    run = RankingRun(
-        period_days=period_days,
-        as_of=as_of,
-        baseline_at=as_of - timedelta(days=period_days),
-        config_version="v1",
-        status="ready",
-    )
-    session.add(run)
-    session.flush()
-    session.add_all(
-        [
-            RankingItem(
-                ranking_run_id=run.id,
-                repository_id=result.repository_id,
-                rank=rank,
-                previous_rank=previous_ranks.get(result.repository_id),
-                start_stars=result.start_stars,
-                end_stars=result.end_stars,
-                net_delta=result.net_delta,
-                growth_rate=result.growth_rate,
-                baseline_available=result.baseline_available,
-            )
-            for rank, result in enumerate(results, start=1)
-        ]
-    )
-    return len(results)
+def _persist_ranking(session: Session, period_days: int, as_of: datetime,
+                     series: list[RepositorySeries] | None = None) -> int:
+    """Compatibility hook; publication monkeypatches this symbol on failure paths.
+
+    Loading and persistence live in :mod:`worker.app.rankings`; when ``series``
+    is omitted the standalone path rebuilds the default eligible cohort there.
+    """
+    return persist_period(session, period_days, as_of, series)
 
 
 @contextmanager

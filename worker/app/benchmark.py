@@ -17,6 +17,7 @@ from app.models import Base, JobRun, Repository, RepoSnapshot
 from sqlalchemy import create_engine, func, select, update
 from sqlalchemy.orm import sessionmaker
 
+from worker.app.rankings import load_repository_series
 from worker.app.snapshots import (
     SnapshotCancelled,
     SnapshotCollector,
@@ -75,8 +76,9 @@ def run_benchmark(limit: int, timeout: int) -> dict:
             rank_started = monotonic()
             with factory() as session:
                 ranking_as_of = captured_at.replace(tzinfo=None)
+                series = load_repository_series(session, ranking_as_of)
                 for period in (1, 7, 14, 30):
-                    _persist_ranking(session, period, ranking_as_of)
+                    _persist_ranking(session, period, ranking_as_of, series)
                     session.commit()
             ranking_seconds = monotonic() - rank_started
         except (SnapshotCancelled, SnapshotIncomplete, GitHubRateLimitError) as exc:
