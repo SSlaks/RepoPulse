@@ -109,6 +109,8 @@ uvicorn app.main:app --reload --port 8000
 
 不提供 `.env` 时，backend/app/config.py 的默认值是 SQLite（`sqlite+aiosqlite:///./repopulse.db` 与 `sqlite:///./repopulse.db`）和 `redis://localhost:6379/0`。默认 `environment` 是 `development`，因此会自动建表并播种演示数据。
 
+升级已有数据库时，先在 `backend/` 目录确认连接配置，再执行 `alembic upgrade head`，最后启动后端。自动建表不会给已有表补充新字段。榜单筛选的派生字段会在迁移中按 Python `lower()` 规则回填；迁移与应用应使用相同的 Python/Unicode 数据版本。生产升级还需先停止旧版 worker 写入，完成迁移后统一切换 API 和 worker，避免新旧版本混跑，具体操作见[运维手册](./operations.md)。
+
 一个关键点：设置会从当前工作目录读取 `.env`。请在 `backend/` 目录内启动后端，不要从仓库根目录启动。从根目录启动可能读到根目录那份为 Docker 写的 `.env`，里面的数据库主机名是 `postgres` 和 `redis`，这些是容器网络里的名字，在宿主机上不可达。容器主机名不是 `localhost`，两套环境不要混用。
 
 ### 前端
