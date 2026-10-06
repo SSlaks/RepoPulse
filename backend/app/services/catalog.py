@@ -1,4 +1,3 @@
-import json
 from collections import Counter
 
 from fastapi import HTTPException, status
@@ -6,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import response_cache
 from app.models import RankingItem, Repository
+from app.ranking.filters import RankingFilters
 from app.repositories.catalog import CatalogRepository
 from app.schemas import (
     ChartRange,
@@ -21,6 +21,7 @@ from app.schemas import (
     SnapshotResponse,
     SnapshotSeriesResponse,
 )
+from app.services.ranking_query import RankingPage, RankingQuery
 from app.services.readme import RepositoryReadmeService
 
 RANGE_DAYS = {"30d": 30, "90d": 90, "365d": 365}
@@ -42,53 +43,39 @@ class CatalogService:
         page: int,
         limit: int,
     ) -> RankingResponse:
-        run = await self._catalog.latest_ranking_run(period)
-        if run is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"{period} 天榜单尚未生成",
-            )
-
-        version = (run.collection_summary or {}).get("fingerprint", "legacy")
-        # 结构化编码保留空值和字面量，避免占位符与分隔符碰撞。
-        parameters = json.dumps(
-            [language, topic, min_stars, query, page, limit],
-            ensure_ascii=False,
-            separators=(",", ":"),
+        filters = RankingFilters(
+            language=language, topic=topic, min_stars=min_stars, query=query
         )
-        cache_key = (
-            f"rankings:v5:{run.id}:{run.published_at}:{version}:{run.config_version}:{period}:"
-            f"{parameters}"
+        runner = RankingQuery(
+            repository=self._catalog,
+            cache=response_cache,
+            build_response=self._build_ranking_response,
         )
-        cached = await response_cache.get(cache_key)
-        if cached:
-            return RankingResponse.model_validate(cached)
+        return await runner.execute(
+            period=int(period), filters=filters, page=page, limit=limit
+        )
 
-        rows = await self._catalog.ranking_rows(run.id)
-        filtered = [
-            self._to_ranking_item(item, repository)
-            for item, repository in rows
-            if self._matches(item, repository, language, topic, min_stars, query)
-        ]
-        offset = (page - 1) * limit
-        response = RankingResponse(
-            data=filtered[offset : offset + limit],
+    def _build_ranking_response(self, page: RankingPage) -> RankingResponse:
+        snapshot = page.snapshot
+        return RankingResponse(
+            data=[
+                self._to_ranking_item(item, repository) for item, repository in page.rows
+            ],
             meta=RankingMeta(
-                period_days=period,
-                as_of=run.as_of,
-                baseline_at=run.baseline_at,
-                generated_at=run.published_at or run.as_of,
-                collection=CollectionSummary.model_validate(run.collection_summary)
-                if run.collection_summary else None,
-                coverage=await self._catalog.coverage_count(),
-                total=len(filtered),
-                page=page,
-                limit=limit,
-                data_mode="demo" if run.config_version == "demo-v1" else "live",
+                period_days=PeriodDays(snapshot.period_days),
+                as_of=snapshot.as_of,
+                baseline_at=snapshot.baseline_at,
+                generated_at=snapshot.generated_at,
+                collection=CollectionSummary.model_validate(snapshot.collection_summary)
+                if snapshot.collection_summary
+                else None,
+                coverage=page.coverage,
+                total=page.total,
+                page=page.page,
+                limit=page.limit,
+                data_mode=snapshot.data_mode,
             ),
         )
-        await response_cache.set(cache_key, response.model_dump(mode="json"))
-        return response
 
     async def repository(self, owner: str, name: str) -> RepositoryResponse:
         repository = await self._catalog.find_repository(owner, name)
@@ -139,29 +126,6 @@ class CatalogService:
                 for value, count in topic_counts.most_common(20)
             ],
         )
-
-    @staticmethod
-    def _matches(
-        ranking_item: RankingItem,
-        repository: Repository,
-        language: str | None,
-        topic: str | None,
-        min_stars: int,
-        query: str | None,
-    ) -> bool:
-        repo_language = repository.language
-        if language and (repo_language or "").lower() != language.lower():
-            return False
-        if topic and topic.lower() not in [item.lower() for item in repository.topics]:
-            return False
-        # 仓库资料可能先于新榜单更新，筛选必须与已发布榜单的展示值一致。
-        if ranking_item.end_stars < min_stars:
-            return False
-        if query:
-            haystack = f"{repository.full_name} {repository.description or ''}"
-            if query.lower() not in haystack.lower():
-                return False
-        return True
 
     @staticmethod
     def _to_ranking_item(item: RankingItem, repository: Repository) -> RankingItemResponse:
