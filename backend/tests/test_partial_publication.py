@@ -175,16 +175,28 @@ async def test_api_metadata_is_versioned_and_independent_of_filters(environment,
     factory, now = environment
     seed_cohort(factory, now)
     tasks.publish_daily_rankings(now.isoformat())
+    from app.cache import ResponseCache
     from app.services.catalog import CatalogService
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-    class Cache:
+
+    class StubRedis:
         def __init__(self):
             self.values = {}
+
         async def get(self, key):
             return self.values.get(key)
-        async def set(self, key, value):
-            self.values[key] = value
-    cache = Cache()
+
+        async def set(self, key, value, ex=None):
+            del ex
+            self.values[key] = value.decode("utf-8") if isinstance(value, bytes) else value
+
+        async def ping(self):
+            return True
+
+        async def aclose(self):
+            pass
+
+    cache = ResponseCache(client=StubRedis())
     monkeypatch.setattr("app.services.catalog.response_cache", cache)
     engine = create_async_engine(str(factory.kw["bind"].url).replace("sqlite:", "sqlite+aiosqlite:"))
     async def read(query=None, page=1):
@@ -205,7 +217,7 @@ async def test_api_metadata_is_versioned_and_independent_of_filters(environment,
         updated = await read()
         assert updated.meta.collection.succeeded == 20
         assert updated.meta.generated_at >= first.meta.generated_at
-        assert len(cache.values) == 3
+        assert cache.entry_count == 3
         with factory() as session:
             for run in session.scalars(select(RankingRun)):
                 run.collection_summary = None

@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     readme_queue_cooldown_seconds: int = Field(default=300, ge=30, le=3600)
     readme_collection_pause_hours: int = Field(default=6, ge=1, le=24)
     readme_cache_ttl_seconds: int = Field(default=300, ge=30, le=3600)
+    response_cache_max_entries: int = Field(default=512, ge=1)
+    response_cache_max_bytes: int = Field(default=16_777_216, ge=0)
+    ranking_max_inflight: int = Field(default=32, ge=1)
+    ranking_max_waiters_per_key: int = Field(default=64, ge=0)
+    ranking_load_timeout_seconds: float = Field(default=10, gt=0)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

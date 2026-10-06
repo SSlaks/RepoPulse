@@ -55,6 +55,7 @@ from app.config import Settings, get_settings
 Settings.model_config["env_file"] = None
 get_settings.cache_clear()
 
+from app.cache import ResponseCache
 from app.database import async_engine, async_session_factory
 from app.models import Base, JobRun
 from app.seed import seed_demo_data
@@ -65,21 +66,30 @@ from test_collection import repository_data
 from worker.app import tasks
 
 
-class InMemoryResponseCache:
-    def __init__(self) -> None:
-        self.values: dict[str, dict[str, Any]] = {}
+class _MemoryRedis:
+    """Async Redis stand-in; the default suite forbids real sockets."""
 
-    async def get(self, key: str) -> dict[str, Any] | None:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.closed = False
+
+    async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
-    async def set(
-        self, key: str, value: dict[str, Any], ttl_seconds: int = 300
-    ) -> None:
-        del ttl_seconds
-        self.values[key] = value
+    async def set(self, key: str, value: bytes, ex: int | None = None) -> None:
+        del ex
+        self.values[key] = value.decode("utf-8") if isinstance(value, bytes) else value
 
     async def ping(self) -> bool:
         return True
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def build_in_memory_cache() -> ResponseCache:
+    """A fully-contracted cache so service code exercises the real protocol."""
+    return ResponseCache(client=_MemoryRedis())
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -109,7 +119,7 @@ def isolate_external_services(
     def reject_network(*_: object, **__: object) -> NoReturn:
         raise AssertionError("default pytest suite attempted a real network connection")
 
-    cache = InMemoryResponseCache()
+    cache = build_in_memory_cache()
     original_connect = socket.socket.connect
     original_connect_ex = socket.socket.connect_ex
 
@@ -153,6 +163,7 @@ def isolate_external_services(
     monkeypatch.setattr("app.services.readme.response_cache", cache)
     monkeypatch.setattr("app.api.routes.system.response_cache", cache)
     monkeypatch.setattr("app.cache.response_cache", cache)
+    monkeypatch.setattr("app.main.response_cache", cache)
     monkeypatch.setattr("app.task_queue.task_sender.send_task", reject_network)
     monkeypatch.setattr(tasks.capture_daily_snapshots, "delay", reject_network)
     monkeypatch.setattr(tasks.publish_daily_rankings, "delay", reject_network)

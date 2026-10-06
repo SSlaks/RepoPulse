@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import rankings, repositories, system
+from app.cache import response_cache
 from app.config import get_settings
 from app.database import async_engine, async_session_factory
 from app.internal.limiter import limiter
@@ -32,14 +33,18 @@ if settings.sentry_dsn:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    if settings.seed_demo_data or settings.environment == "development":
-        async with async_engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        async with async_session_factory() as session:
-            await seed_demo_data(session)
-    yield
-    await limiter.close()
-    await async_engine.dispose()
+    response_cache.start()
+    try:
+        if settings.seed_demo_data or settings.environment == "development":
+            async with async_engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            async with async_session_factory() as session:
+                await seed_demo_data(session)
+        yield
+    finally:
+        await response_cache.close()
+        await limiter.close()
+        await async_engine.dispose()
 
 
 app = FastAPI(
