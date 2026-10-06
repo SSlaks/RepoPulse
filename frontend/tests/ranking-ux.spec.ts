@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page, type Route, type TestInfo } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page, type Route } from "@playwright/test";
 
 import { rankingPageFixture } from "./reliability-fixtures";
 
